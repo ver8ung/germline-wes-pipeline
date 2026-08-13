@@ -1,0 +1,6 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - ucsc-liftover    # hg19 -> GRCh38 coordinate conversion of the capture BED
+  - bedtools         # merge split/overlapping lifted intervals into a clean set

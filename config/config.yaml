@@ -1,0 +1,143 @@
+# =============================================================================
+# NGS germline short-variant pipeline — configuration
+# Human WES, GRCh38, GATK best-practices, Snakemake.
+# Every path is relative to the workflow working directory (the repo root).
+# =============================================================================
+
+# --- Sample sheets ----------------------------------------------------------
+samples: config/samples.tsv      # one row per biological sample
+# Primary live run = NA12878 / Twist Exome 2.0 (PacBio Onso), matched to the
+# active Twist BED below. The Garvan/Nextera cross-validation run overrides this
+# (and intervals.bed) via:  run --configfile config/garvan_nextera.yaml ...
+units:   config/units.tsv        # one row per sequencing unit (lane/library) of a sample
+
+# --- Reference genome -------------------------------------------------------
+# Defaults point at the public Broad/GATK GRCh38 resource bundle (chr-named
+# contigs: chr1, chr2, ... chrM). All known-sites VCFs below MUST use the same
+# naming, which the Broad bundle does. The pipeline downloads + indexes these.
+ref:
+  build:   GRCh38
+  species: homo_sapiens
+  # Local destination (created by the resources rules) + remote source.
+  fasta:     resources/genome/Homo_sapiens_assembly38.fasta
+  fasta_url: https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.fasta
+
+# Known-sites VCFs for BaseRecalibrator (BQSR). Each entry: a local path + URL.
+# .tbi indexes are (re)built locally by the `tabix_known` rule if missing.
+known_sites:
+  dbsnp:
+    path: resources/known/Homo_sapiens_assembly38.dbsnp138.vcf.gz
+    url:  https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.dbsnp138.vcf.gz
+  mills:
+    path: resources/known/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz
+    url:  https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz
+  known_indels:
+    path: resources/known/Homo_sapiens_assembly38.known_indels.vcf.gz
+    url:  https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0/Homo_sapiens_assembly38.known_indels.vcf.gz
+
+# --- Exome capture intervals ------------------------------------------------
+# WES MUST be restricted to the capture target regions of your kit
+# (Agilent SureSelect, IDT xGen, Twist, etc.). Drop your kit's target BED at
+# the path below (GRCh38, chr-named). It is padded and converted to a GATK
+# interval_list by the `bed_to_intervals` rule.
+intervals:
+  # GRCh38 capture targets, chr-named. FOUR switchable providers are wired up
+  # (see the `capture_bed` section + workflow/rules/capture_bed.smk);
+  # `get_capture_bed` builds whichever path this points at. Switch by repointing:
+  #   - Twist Exome 2.0      (native GRCh38, downloaded)  <-- ACTIVE, ~36.5 Mb
+  #       resources/intervals/twist_exome_v2.GRCh38.bed
+  #   - Illumina Exome 2.5   (Twist-built, native GRCh38)         ~37.5 Mb
+  #       resources/intervals/illumina_exome_v2.5.GRCh38.bed
+  #   - IDT xGen Exome v2    (independent design, native GRCh38)  ~34.2 Mb
+  #       resources/intervals/idt_xgen_exome_v2.GRCh38.bed
+  #   - Nextera Expanded     (hg19 BED -> lifted to GRCh38)       ~62 Mb
+  #       resources/intervals/nextera_expandedexome.GRCh38.bed
+  # NOTE: Twist 2.0 and Illumina 2.5 are the SAME design family (~99% identical;
+  # 2.5 is newer / ~1 Mb larger). IDT is an independent design (~87% overlap) —
+  # the useful "different vendor" cross-check. Nextera matches the kit that
+  # produced the GIAB NA12878 eval data, so it is the "matched" choice for
+  # benchmarking; the native exomes are cleaner defaults for your OWN live runs.
+  # For any other kit, just drop its GRCh38 BED here instead.
+  bed:     resources/intervals/twist_exome_v2.GRCh38.bed
+  padding: 100        # bp added on each side of every target (captures splice flanks)
+
+# --- Capture-BED providers --------------------------------------------------
+# capture_bed.smk turns any of these sources into a 3-col, chr-named GRCh38 BED
+# (trim + primary-filter + sort + merge) at the corresponding path above. All
+# rules stay available; pick one via intervals.bed. twist_url / illumina_url /
+# idt_url share one download recipe (_NATIVE_BED_SHELL).
+capture_bed:
+  # Twist Exome 2.0 — native GRCh38, no liftover. Heavily-annotated 4-col BED.
+  twist_url:    https://www.twistbioscience.com/content/dam/twistbioscience/resources/2022-12/hg38_exome_v2.0.2_targets_sorted_validated.re_annotated.bed
+  # Illumina DNA Prep with Exome 2.5 — the Twist-built Illumina exome (newer than
+  # Twist 2.0). Public Illumina CDN, native GRCh38, same 4-col format.
+  illumina_url: https://support.illumina.com/content/dam/illumina-support/documents/downloads/productfiles/illumina-prep/exome/hg38_Twist_Bioscience_for_Illumina_Exome_2_5.bed
+  # IDT xGen Exome Research Panel v2 — independent design, native GRCh38 BED6.
+  # Public IDT Azure CDN (the ?sfvrsn= cache-buster token is not required).
+  idt_url:      https://sfvideo.blob.core.windows.net/sitefinity/docs/default-source/supplementary-product-info/xgen-exome-research-panel-v2-targets-hg38.bed
+  # Nextera Rapid Capture Expanded Exome — Illumina ships hg19 only; lifted to
+  # GRCh38 via the UCSC chain (then primary-contig filtered, sorted, merged).
+  hg19_url:     https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/NA12878/Garvan_NA12878_HG001_HiSeq_Exome/nexterarapidcapture_expandedexome_targetedregions.bed.gz
+  chain_url:    https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz
+
+# --- Benchmarking against the GIAB truth set (hap.py) ------------------------
+# `benchmark` target compares results/filtered/all.filtered.vcf.gz to the GIAB
+# HG001/NA12878 GRCh38 v4.2.1 high-confidence calls, restricted to (confident
+# regions ∩ capture targets). Truth files are downloaded if absent.
+benchmark:
+  base_url:  https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/release/NA12878_HG001/NISTv4.2.1/GRCh38/
+  truth_vcf: resources/benchmark/HG001_GRCh38_1_22_v4.2.1_benchmark.vcf.gz
+  truth_bed: resources/benchmark/HG001_GRCh38_1_22_v4.2.1_benchmark.bed
+
+# --- Variant hard-filtering thresholds (GATK best-practice defaults) ---------
+# Used instead of VQSR so the pipeline works for any cohort size, incl. n=1.
+# Switch to VQSR for large cohorts (>~30 exomes) — see README.
+filtering:
+  snvs:
+    # name: expression  (a record FAILS the filter when the expression is TRUE)
+    QD2:               "QD < 2.0"
+    FS60:              "FS > 60.0"
+    MQ40:              "MQ < 40.0"
+    MQRankSum-12.5:    "MQRankSum < -12.5"
+    ReadPosRankSum-8:  "ReadPosRankSum < -8.0"
+    SOR3:              "SOR > 3.0"
+  indels:
+    QD2:               "QD < 2.0"
+    FS200:             "FS > 200.0"
+    ReadPosRankSum-20: "ReadPosRankSum < -20.0"
+    SOR10:             "SOR > 10.0"
+
+# --- Annotation -------------------------------------------------------------
+annotation:
+  snpeff:
+    # `hg38` is the chr-named (UCSC/RefSeq) SnpEff database — it matches the
+    # Broad reference contig naming, so NO contig renaming is needed.
+    # `GRCh38.105` (Ensembl, no-chr) would require renaming — see README.
+    db: hg38
+    datadir: resources/snpeff   # SnpEff downloads its DB here (kept out of the env)
+  clinvar:
+    # Optional ClinVar (SnpSift) overlay. Off by default: NCBI ClinVar uses
+    # Ensembl-style contigs, so when enabled it is downloaded AND renamed to
+    # chr-naming (via the generated map) to match our VCF.
+    activate: false
+    url:  https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz
+    path: resources/annotation/clinvar.grch38.chr.vcf.gz
+
+# --- Per-tool resources -----------------------------------------------------
+# Generic knobs surfaced for tuning on small (laptop) vs large (server) hosts.
+resources:
+  bwa_mem:
+    threads: 8
+    mem_mb: 12000          # classic bwa index needs ~6 GB resident
+  sort:
+    threads: 4
+    mem_mb: 8000
+  markdup:
+    mem_mb: 8000
+  bqsr:
+    mem_mb: 6000
+  haplotypecaller:
+    threads: 4             # via --native-pair-hmm-threads
+    mem_mb: 8000
+  genotype:
+    mem_mb: 8000

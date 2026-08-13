@@ -1,0 +1,4 @@
+# Drop your raw paired-end FASTQ files here (or anywhere; point config/units.tsv at them).
+# Expected by the example config/units.tsv:
+#   data/NA12878_L001_R1.fastq.gz
+#   data/NA12878_L001_R2.fastq.gz

@@ -1,0 +1,13 @@
+# Base image reference passed to the Dockerfile as --build-arg BASE=... by the
+# run.ps1 / run.sh launchers. The first non-comment, non-blank line is used.
+#
+# TO PIN (option 2 — reproducible rebuilds): replace the line below with a
+# digest-pinned reference, e.g.
+#   condaforge/miniforge3@sha256:<full-64-hex-digest>
+#
+# Get the digest on a machine that has the image pulled:
+#   docker inspect --format '{{ index .RepoDigests 0 }}' condaforge/miniforge3:latest
+# (or: docker buildx imagetools inspect condaforge/miniforge3:latest)
+#
+# Until pinned, this floating tag is used (builds work, but the base can drift).
+condaforge/miniforge3:latest

@@ -1,0 +1,16 @@
+# Live run: NA12878, PacBio Onso (PE100), Twist Exome 2.x capture.
+# Scored against the Twist Exome 2.0.2 capture BED (config intervals.bed = twist).
+# FULL 8-PLEX POOL: all 8 libraries are the SAME sample (NA12878), so they are
+# 8 sequencing units of one sample -> pooled to raise depth and lift the
+# low-coverage capture targets (the dominant recall limiter at 1 replicate).
+# PL:ILLUMINA — Onso emits Illumina-compatible short reads; the PL tag is cosmetic
+# for this short-read pipeline (bwa-mem / GATK do not branch on it here).
+sample	unit	platform	fq1	fq2
+NA12878	onso01	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_01_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_01_R2.fastq.gz
+NA12878	onso02	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_02_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_02_R2.fastq.gz
+NA12878	onso03	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_03_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_03_R2.fastq.gz
+NA12878	onso04	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_04_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_04_R2.fastq.gz
+NA12878	onso05	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_05_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_05_R2.fastq.gz
+NA12878	onso06	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_06_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_06_R2.fastq.gz
+NA12878	onso07	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_07_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_07_R2.fastq.gz
+NA12878	onso08	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_08_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_08_R2.fastq.gz

@@ -1,0 +1,23 @@
+# Normalize line endings to LF on checkout, on every platform. This keeps:
+#  - run.sh executable on Linux (CRLF would break the shebang),
+#  - the Docker-baked env-digest stable (CRLF would change the hash and trip the
+#    staleness guard even when nothing meaningfully changed).
+* text=auto eol=lf
+
+# Binary blobs (mostly gitignored, but marked so git never touches their bytes).
+*.gz   binary
+*.bgz  binary
+*.bam  binary
+*.bai  binary
+*.cram binary
+*.crai binary
+*.tbi  binary
+*.csi  binary
+*.fa   binary
+*.fasta binary
+*.bin  binary
+*.zip  binary
+*.dict binary
+*.bed  binary
+*.interval_list binary
+*.table binary

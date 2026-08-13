@@ -1,0 +1,38 @@
+# Generated / large data — never commit.
+#
+# NOTE: git only treats '#' as a comment at the START of a line. A trailing
+# "pattern/    # explanation" is NOT a comment: the spaces and the text become
+# part of the pattern, which then matches nothing. Keep every comment on its
+# own line. (This file previously had that bug and excluded 0 bytes, which
+# would have staged ~84 GB.)
+
+# Downloaded reference, known sites, capture BEDs, SnpEff DB, GIAB truth.
+# All regenerable: `run setup_reference`, `run get_capture_bed`, `run snpeff_download`.
+# The vendor capture BEDs (Twist / Illumina / IDT) are also not ours to redistribute.
+resources/
+
+# All pipeline outputs.
+results/
+
+# Per-rule tool logs.
+logs/
+
+# Snakemake state + per-rule conda envs.
+.snakemake/
+
+# Raw FASTQ inputs (keep the directory itself so the tree is self-describing).
+data/*
+!data/.gitkeep
+
+# Local validation scratch (see README: validating changes without conda).
+.miniforge/
+.miniforge_installer.exe
+.condaenv/
+.dryrun_venv/
+.validate_venv/
+
+# OS / editor cruft
+*.pyc
+__pycache__/
+.DS_Store
+Thumbs.db

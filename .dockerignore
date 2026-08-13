@@ -1,0 +1,14 @@
+# Build context is the PROJECT ROOT (the image COPYs workflow/, config/, .tests/).
+# Everything below is large or generated and must NOT be sent to the daemon.
+.git/
+resources/
+results/
+logs/
+.snakemake/
+data/
+.miniforge/
+.miniforge_installer.exe
+.condaenv/
+.dryrun_venv/
+.validate_venv/
+*.log

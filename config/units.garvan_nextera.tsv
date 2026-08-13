@@ -1,0 +1,9 @@
+# Cross-validation run: NA12878 captured with the Illumina Nextera Rapid Capture
+# Expanded Exome, sequenced on Illumina HiSeq 2500 (2x101). The "matched" kit for
+# this data is the lifted Nextera BED — selected by config/garvan_nextera.yaml.
+# Two libraries (NIST7035, NIST7086), two lanes each = 4 units, merged per sample.
+sample	unit	platform	fq1	fq2
+NA12878	7035_L001	ILLUMINA	data/garvan/NIST7035_TAAGGCGA_L001_R1_001.fastq.gz	data/garvan/NIST7035_TAAGGCGA_L001_R2_001.fastq.gz
+NA12878	7035_L002	ILLUMINA	data/garvan/NIST7035_TAAGGCGA_L002_R1_001.fastq.gz	data/garvan/NIST7035_TAAGGCGA_L002_R2_001.fastq.gz
+NA12878	7086_L001	ILLUMINA	data/garvan/NIST7086_CGTACTAG_L001_R1_001.fastq.gz	data/garvan/NIST7086_CGTACTAG_L001_R2_001.fastq.gz
+NA12878	7086_L002	ILLUMINA	data/garvan/NIST7086_CGTACTAG_L002_R1_001.fastq.gz	data/garvan/NIST7086_CGTACTAG_L002_R2_001.fastq.gz

@@ -1,0 +1,2 @@
+sample	unit	platform	fq1	fq2
+smoke	L001	ILLUMINA	results/smoke/smoke.R1.fastq.gz	results/smoke/smoke.R2.fastq.gz

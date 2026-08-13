@@ -1,0 +1,9 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  # Pinned like every other env here: GATK is pinned to an exact build, so the
+  # tool that scores its output is pinned too — an unpinned benchmark engine
+  # silently shifts precision/recall between runs of the same pipeline. 0.3.15
+  # is the latest bioconda release.
+  - hap.py =0.3.15   # GA4GH benchmarking vs the GIAB truth set (default xcmp engine)

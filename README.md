@@ -1,0 +1,317 @@
+# NGS germline short-variant pipeline (WES, GRCh38)
+
+End-to-end, reproducible variant calling from **raw FASTQ reads → annotated VCF**,
+following [GATK germline short-variant best practices](https://gatk.broadinstitute.org/hc/en-us/articles/360035535932).
+Orchestrated with **Snakemake**, every tool pinned in its own **Conda** env, and
+the whole thing wrapped in a single **Docker** image so it runs the same on
+Windows, macOS, Linux, or an HPC node.
+
+- **Analysis:** germline SNPs + small indels
+- **Assay:** whole-exome (WES), restricted to your capture kit's targets
+- **Reference:** GRCh38 (Broad/GATK bundle, `chr`-named contigs)
+- **Cohort size:** any `n ≥ 1` (joint genotyping + hard-filtering)
+
+---
+
+## Pipeline stages
+
+```
+                 ┌─ FastQC (raw QC) ─────────────────────────────┐
+ FASTQ (R1/R2) ──┤                                                │
+   per unit      └─ fastp (trim/adapter) ─ bwa-mem ─ sort ──┐     │
+                                                            │     │
+              merge units → MarkDuplicates → BQSR  ◄────────┘     │
+                                  │                               │
+              HaplotypeCaller (GVCF, per sample, on targets)      │
+                                  │                               │
+              CombineGVCFs → GenotypeGVCFs   (cohort joint call)  │
+                                  │                               │
+              SelectVariants → VariantFiltration → MergeVcfs      │  (QC metrics
+                                  │                               │   from every
+              SnpEff  (+ optional SnpSift / ClinVar)              │   stage)
+                                  │                               │
+        results/annotated/all.annotated.vcf.gz                    │
+                                                                  ▼
+                                              MultiQC ─ results/qc/multiqc_report.html
+```
+
+| Stage | Tool | Key output |
+|-------|------|-----------|
+| Raw QC | FastQC | `results/qc/fastqc/` |
+| Trim | fastp | `results/trimmed/`, `results/qc/fastp/` |
+| Align | bwa-mem + samtools | `results/mapped/` (temp) |
+| Dedup | GATK MarkDuplicates | `results/dedup/` (temp) + metrics |
+| Recalibrate | GATK BQSR | `results/bqsr/*.recal.bam` |
+| Call | GATK HaplotypeCaller (GVCF) | `results/called/*.g.vcf.gz` |
+| Joint genotype | CombineGVCFs + GenotypeGVCFs | `results/genotyped/cohort.vcf.gz` |
+| Filter | GATK hard-filter | `results/filtered/all.filtered.vcf.gz` |
+| Annotate | SnpEff (+ SnpSift) | **`results/annotated/all.annotated.vcf.gz`** |
+| Report | MultiQC | `results/qc/multiqc_report.html` |
+
+---
+
+## Layout
+
+```
+ngs-germline-wes/
+├── config/
+│   ├── config.yaml         # all knobs: reference URLs, intervals, filters, annotation
+│   ├── samples.tsv         # one row per biological sample
+│   └── units.tsv           # one row per lane/library (FASTQ pair) of a sample
+├── workflow/
+│   ├── Snakefile           # includes the rule modules, defines `all` + `setup_reference`
+│   ├── rules/*.smk         # common, resources, qc, trim, map, dedup_bqsr,
+│   │                       #   calling, filtering, annotation, stats
+│   └── envs/*.yaml         # pinned per-tool Conda environments
+├── docker/Dockerfile       # Snakemake + conda/mamba orchestrator image
+├── data/                   # ← put your FASTQ here (gitignored)
+├── resources/              # ← downloaded reference/known-sites/db (gitignored)
+├── results/                # ← pipeline outputs (gitignored)
+├── run.ps1                 # Windows launcher
+└── run.sh                  # Linux/macOS/WSL launcher
+```
+
+---
+
+## Prerequisites
+
+- **Docker Desktop** (Windows/macOS) or Docker Engine (Linux). Nothing else is
+  installed on the host — Snakemake and every bioinformatics tool live in the image
+  / per-rule Conda envs.
+- **Memory:** give Docker **≥ 12 GB** RAM (Docker Desktop → Settings → Resources).
+  `bwa index` of GRCh38 and GATK each need several GB; the launchers request 16 GB.
+- **Disk:** ~30 GB for the reference bundle + known sites + SnpEff DB, plus working space.
+- **Network:** the first run downloads the reference, known-sites VCFs, and the
+  SnpEff database.
+
+---
+
+## Quick start
+
+**1. Point the sample sheets at your data.** Edit `config/units.tsv`
+(tab-separated — one row per FASTQ pair):
+
+```tsv
+sample	unit	platform	fq1	fq2
+NA12878	L001	ILLUMINA	data/NA12878_L001_R1.fastq.gz	data/NA12878_L001_R2.fastq.gz
+```
+
+and `config/samples.tsv` (one row per sample). A sample may span several `unit`
+rows (multiple lanes/libraries) — they're aligned separately with distinct read
+groups and merged before duplicate marking.
+
+**2. Supply your exome capture targets.** The default `config/config.yaml` →
+`intervals.bed` is `resources/intervals/twist_exome_v2.GRCh38.bed`, which
+`run get_capture_bed` builds for you. To use a different kit, point `intervals.bed`
+at your own GRCh38, `chr`-named target BED from the vendor (Agilent SureSelect,
+IDT xGen, Twist, …).
+
+**3. Run it.**
+
+```powershell
+# Windows, from the project root. Use run.cmd (works in cmd.exe AND PowerShell):
+run smoke -n                 # dry-run the smoke test (no downloads)
+run setup_reference          # download + index reference (once, ~20–40 min)
+run --cores 8                # full pipeline → results/annotated/all.annotated.vcf.gz
+```
+
+> **Why not just type `run.ps1`?** Double-clicking a `.ps1` or typing its bare
+> name opens it in **Notepad** — Windows associates `.ps1` with *edit*, not *run*.
+> Use `run.cmd` (above), or invoke the script explicitly in PowerShell with the
+> `.\` prefix: `.\run.ps1 --cores 8`. If PowerShell blocks it with an
+> execution-policy error, either run via `run.cmd`, or allow local scripts once:
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+```bash
+# Linux / macOS / WSL:
+./run.sh -n
+./run.sh setup_reference
+./run.sh --cores 8
+```
+
+The launchers build the Docker image on first use, bind-mount the project at
+`/workflow`, and run `snakemake --use-conda` (per-rule envs are created once and
+cached under `.snakemake/conda`). Any extra arguments pass straight through to
+Snakemake, e.g. `./run.sh --cores 8 -p` or a specific target file.
+
+> The image **build** is the slow part — it bakes all tool envs in (budget
+> ~15–30 min, once). After that the first **run** only needs the one-time
+> reference download; the per-rule envs are already inside the image.
+
+---
+
+## Image versioning & rebuilds
+
+The launchers keep each image in lockstep with the code that defines it:
+
+- **Commit-tagged images.** The tag is `git-<short-sha>` (plus `-dirty` if the
+  working tree has uncommitted changes), or `src-<hash>` of the Dockerfile +
+  `workflow/envs/*.yaml` when this isn't a git checkout. Each distinct tag builds
+  its own image; `:latest` also points at the most recent build.
+- **Pinned base.** The base image is read from
+  [docker/base-image.txt](docker/base-image.txt) and passed as a build-arg — pin
+  it to a digest there for reproducible rebuilds (instructions in the file).
+- **Staleness guard.** Before every run the launcher runs the image's baked
+  `check-bake` script, which re-hashes the bind-mounted `workflow/envs/*.yaml` and
+  compares to the digest baked at build time. If they differ you get a loud
+  WARNING (otherwise the per-rule envs would be silently re-created every run).
+  Re-bake with `docker rmi <image>` then re-run the launcher.
+
+**Needs a rebuild:** changes to `workflow/envs/*.yaml` (tool versions) or the
+Dockerfile. **Does *not*:** rule logic, config, sample sheets, params, intervals —
+those are bind-mounted and take effect on the next run.
+
+## Configuration highlights (`config/config.yaml`)
+
+- **`ref`** — GRCh38 FASTA URL (Broad bundle). Downloaded + indexed
+  (`.fai`, `.dict`, bwa index) automatically.
+- **`known_sites`** — dbSNP, Mills gold-standard indels, 1000G known indels, for BQSR.
+- **`intervals`** — capture BED + `padding` (default 100 bp each side) applied at
+  HaplotypeCaller/BQSR time.
+- **`filtering`** — GATK hard-filter thresholds, split for SNPs vs indels. Edit to taste.
+- **`annotation.snpeff.db`** — defaults to **`hg38`** (UCSC/RefSeq, `chr`-named) so it
+  matches the Broad reference contigs with no renaming. See *Design notes*.
+- **`annotation.clinvar.activate`** — set `true` to overlay ClinVar IDs (downloaded
+  and contig-renamed to match). Off by default.
+- **`resources`** — per-step threads / memory; tune for laptop vs server.
+
+---
+
+## Outputs
+
+- **`results/annotated/all.annotated.vcf.gz`** — the headline: joint-called,
+  hard-filtered, functionally annotated multi-sample VCF (+ `.tbi`).
+  Records that fail a hard filter are **tagged in `FILTER`, not dropped** — select
+  `PASS` downstream if you want only high-confidence calls.
+- **`results/qc/multiqc_report.html`** — one report aggregating FastQC, fastp,
+  MarkDuplicates, samtools, bcftools, and SnpEff metrics across all samples.
+- Intermediates under `results/` (recalibrated BAMs, per-sample GVCFs, the raw
+  genotyped VCF). Per-rule logs under `logs/`.
+
+---
+
+## Design notes & gotchas
+
+- **Contig naming.** The Broad GRCh38 bundle, its known-sites VCFs, and SnpEff
+  `hg38` all use `chr1…chr22,chrX,chrY,chrM` — kept consistent end-to-end. If you
+  switch to the Ensembl SnpEff DB (`GRCh38.105`, no `chr`), you must rename contigs
+  around annotation (`bcftools annotate --rename-chrs`). ClinVar (Ensembl-named) is
+  already handled: when enabled it's downloaded and renamed to `chr` once.
+- **Hard-filtering, not VQSR.** VQSR needs a large cohort to train; hard-filtering
+  works for any size including a single exome. For large cohorts (≳ 30 WES) switch
+  to VQSR (`VariantRecalibrator` / `ApplyVQSR`) for better sensitivity/specificity.
+- **CombineGVCFs vs GenomicsDBImport.** `CombineGVCFs` is used for portability and
+  robustness inside containers. For large cohorts, `GenomicsDBImport` scales better
+  — swap it into `calling.smk` and feed its workspace to `GenotypeGVCFs`.
+- **bwa (classic), not bwa-mem2.** Classic `bwa` index is ~6 GB resident; bwa-mem2 is
+  faster but needs ~30 GB RAM for the GRCh38 index — impractical on a laptop. Swap in
+  `map.smk`/`envs/bwa.yaml` if you have the memory.
+- **No interval scatter.** HaplotypeCaller runs over the whole target list per
+  sample. For WES that's fine; for WGS or speed, scatter by interval and gather.
+- **Pre-baked Conda envs.** Each rule's tools come from a pinned Conda env
+  ([workflow/envs/](workflow/envs/)), created at **image build time** into
+  `/opt/snakemake-envs` and reused at run time via `--conda-prefix` (the launchers
+  pass it), so runs are offline with no first-run env creation. Snakemake matches a
+  baked env by its YAML *content* hash — see **Image versioning & rebuilds** above
+  for how the staleness guard catches drift. On Linux/HPC you can instead attach
+  per-rule `container:` directives and run `snakemake --sdm apptainer` for true
+  per-tool images.
+
+---
+
+## Handy commands
+
+```bash
+# Build the image manually — context is the PROJECT ROOT, -f points into docker/:
+docker build -t ngs-germline-wes -f docker/Dockerfile .
+
+./run.sh -n                                  # dry-run (plan only)
+./run.sh --cores 8 -p                        # full run, print shell commands
+./run.sh setup_reference                     # only fetch + index reference data
+./run.sh --cores 4 results/called/NA12878.g.vcf.gz   # build one target
+./run.sh --dag | dot -Tsvg > dag.svg         # render the DAG (needs graphviz)
+./run.sh --report report.html                # Snakemake provenance report (after a run)
+docker run --rm -it -v "${PWD}:/workflow" -w /workflow ngs-germline-wes bash  # poke around
+```
+
+## Smoke test (built in)
+
+A self-contained smoke test exercises the **entire DAG** without your own data or
+a full exome. It simulates ~40x paired reads (wgsim) over a 100 kb chr20 window
+and runs them all the way to an annotated VCF. It uses a config overlay
+([.tests/smoke/](.tests/smoke/)) that repoints only the inputs — reference, known
+sites, filters, and SnpEff DB are inherited unchanged.
+
+```powershell
+.\run.ps1 smoke -n     # dry-run: resolves the whole plan, downloads nothing
+.\run.ps1 smoke        # full run: simulate -> align -> call -> filter -> annotate
+```
+```bash
+./run.sh smoke -n
+./run.sh smoke
+```
+
+Equivalent to `snakemake --configfile .tests/smoke/config.yaml --cores 4 [...]`.
+
+- **`smoke -n`** is the fast wiring check: it confirms every rule connects with
+  **zero downloads** and zero compute — do this first.
+- **`smoke`** (no `-n`) still needs the GRCh38 reference (download + BWA index is
+  unavoidable for real alignment/BQSR/calling), but after that the run finishes in
+  minutes instead of hours — a true end-to-end validation before you commit to a
+  full exome.
+
+To smoke-test with real data instead, grab a small public exome (e.g. a Genome in
+a Bottle NA12878 subset), point `units.tsv` at the FASTQs, and use a small BED.
+
+## Evaluating against GIAB (NA12878 / HG001)
+
+The repo is preconfigured for a **benchmarkable real run** against the GIAB
+NA12878 truth set — `config/samples.tsv` + `config/units.tsv` already describe one
+`NA12878` sample with 4 units (two libraries × two lanes, ≈100× combined).
+
+1. **Download the WES reads** (≈15 GB, 8 files) into `data\garvan\` (where
+   `config/units.garvan_nextera.tsv` expects them):
+   ```powershell
+   $u='https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/NA12878/Garvan_NA12878_HG001_HiSeq_Exome/'
+   $dst='data\garvan'; New-Item -ItemType Directory -Force $dst | Out-Null
+   'NIST7035_TAAGGCGA_L001_R1_001','NIST7035_TAAGGCGA_L001_R2_001',
+   'NIST7035_TAAGGCGA_L002_R1_001','NIST7035_TAAGGCGA_L002_R2_001',
+   'NIST7086_CGTACTAG_L001_R1_001','NIST7086_CGTACTAG_L001_R2_001',
+   'NIST7086_CGTACTAG_L002_R1_001','NIST7086_CGTACTAG_L002_R2_001' |
+     ForEach-Object { curl.exe -L -o "$dst\$_.fastq.gz" "$u$_.fastq.gz" }
+   ```
+
+2. **Build the GRCh38 capture BED** (Illumina ships only hg19 → lifted over):
+   ```
+   run get_capture_bed
+   ```
+   → `resources/intervals/nextera_expandedexome.GRCh38.bed` (what `intervals.bed` points at).
+
+3. **Run the pipeline:** `run --cores 8` → `results/annotated/all.annotated.vcf.gz`
+
+4. **Benchmark** vs. GIAB high-confidence calls (hap.py, scored on *confident
+   regions ∩ capture targets*; truth files auto-download):
+   ```
+   run benchmark
+   ```
+   → `results/benchmark/happy.summary.csv` (precision / recall / F1 for SNPs & indels).
+
+> **Rebuild the image first.** These features add two tool envs (`ucsc-liftover`,
+> `hap.py`), so the pre-baked image is now stale — the launcher's staleness guard
+> will warn. Re-bake: `docker rmi <image>` then re-run, or
+> `docker build -t ngs-germline-wes -f docker/Dockerfile .`
+
+---
+
+## Troubleshooting
+
+- **`Missing input files … twist_exome_v2.GRCh38.bed`** — the default capture BED
+  hasn't been built yet; run `run get_capture_bed` (or point `intervals.bed` at your
+  own kit-specific BED).
+- **OOM / killed JVM** — raise Docker's memory and/or lower the per-step `mem_mb`
+  in `config.yaml` so `-Xmx` fits.
+- **SnpEff "database not found"** — the `snpeff_download` rule needs network; or set
+  `annotation.snpeff.db` to one shown by `snpEff databases | grep -i grch38`.
+- **VariantFiltration JEXL warnings about missing annotations** — expected when an
+  annotation (e.g. `MQRankSum`) is absent at a site; that site simply isn't filtered
+  by that expression.

@@ -1,0 +1,62 @@
+# =============================================================================
+# NGS germline short-variant pipeline  (FASTQ -> annotated VCF)
+# Human WES · GRCh38 · GATK best practices · Snakemake
+#
+# DAG (per unit, then per sample, then per cohort):
+#
+#   FASTQ ─ fastqc ─┐
+#         └ fastp(trim) ─ bwa-mem ─ sort ─┐
+#                                          merge units ─ MarkDuplicates ─ BQSR
+#                                                                          │
+#                                       HaplotypeCaller (GVCF, per sample) ┘
+#                                                   │
+#                            CombineGVCFs ─ GenotypeGVCFs (cohort)
+#                                                   │
+#                         SelectVariants ─ VariantFiltration ─ MergeVcfs
+#                                                   │
+#                               SnpEff (+ optional SnpSift/ClinVar)
+#                                                   │
+#                                  results/annotated/all.annotated.vcf.gz
+#
+#   QC metrics from every stage ─ MultiQC ─ results/qc/multiqc_report.html
+# =============================================================================
+from snakemake.utils import min_version
+
+min_version("7.25.0")
+
+
+configfile: "config/config.yaml"
+
+
+# common.smk defines: sample/unit tables, helper functions, wildcard
+# constraints, and get_final_output(). Include it first.
+include: "rules/common.smk"
+include: "rules/resources.smk"
+include: "rules/qc.smk"
+include: "rules/trim.smk"
+include: "rules/map.smk"
+include: "rules/dedup_bqsr.smk"
+include: "rules/calling.smk"
+include: "rules/filtering.smk"
+include: "rules/annotation.smk"
+include: "rules/stats.smk"
+include: "rules/smoke.smk"
+include: "rules/capture_bed.smk"
+include: "rules/benchmark.smk"
+
+
+# Default target: build the annotated cohort VCF + the MultiQC report.
+rule all:
+    input:
+        get_final_output(),
+
+
+# Convenience target: only fetch + index reference data (run once, up front).
+rule setup_reference:
+    input:
+        config["ref"]["fasta"],
+        config["ref"]["fasta"] + ".fai",
+        multiext(config["ref"]["fasta"], ".amb", ".ann", ".bwt", ".pac", ".sa"),
+        ref_dict(),
+        [ks["path"] + ".tbi" for ks in config["known_sites"].values()],
+        INTERVALS,

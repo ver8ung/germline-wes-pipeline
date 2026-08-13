@@ -1,0 +1,7 @@
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - wgsim            # tiny synthetic-read simulator (smoke test only)
+  - samtools =1.20   # faidx region extraction
+  - htslib =1.20     # bgzip

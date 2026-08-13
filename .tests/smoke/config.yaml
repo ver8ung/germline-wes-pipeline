@@ -1,0 +1,14 @@
+# Smoke-test config overlay. Apply ON TOP of config/config.yaml:
+#
+#     snakemake --configfile .tests/smoke/config.yaml --cores 4
+#
+# Snakemake deep-merges this over the base config, so only the inputs change:
+# a single tiny "smoke" sample whose reads are simulated by smoke_simulate_reads
+# from a 100 kb chr20 window. Everything else (reference, known sites, filters,
+# SnpEff db) is inherited from the base config unchanged.
+samples: .tests/smoke/samples.tsv
+units: .tests/smoke/units.tsv
+
+intervals:
+  bed: .tests/smoke/smoke.bed
+  padding: 100
