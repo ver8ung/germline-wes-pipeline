@@ -34,8 +34,11 @@ rule samtools_flagstat:
 
 rule bcftools_stats:
     input:
-        vcf="results/filtered/all.filtered.vcf.gz",
-        tbi="results/filtered/all.filtered.vcf.gz.tbi",
+        # The PASS callset, matching what annotation ships. Run against the
+        # flagged VCF this counted records the pipeline had marked as failing,
+        # so the MultiQC variant totals disagreed with the actual deliverable.
+        vcf="results/filtered/all.pass.vcf.gz",
+        tbi="results/filtered/all.pass.vcf.gz.tbi",
     output:
         "results/qc/bcftools/all.stats.txt",
     log:

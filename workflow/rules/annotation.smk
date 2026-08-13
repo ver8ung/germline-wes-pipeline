@@ -40,21 +40,26 @@ rule snpeff_download:
 
 rule snpeff:
     input:
-        vcf="results/filtered/all.filtered.vcf.gz",
-        tbi="results/filtered/all.filtered.vcf.gz.tbi",
+        # PASS-only, not the flagged VCF -- see rule select_pass in filtering.smk.
+        vcf="results/filtered/all.pass.vcf.gz",
+        tbi="results/filtered/all.pass.vcf.gz.tbi",
         db=f"{SNPEFF_DATADIR}/{SNPEFF_DB}",
     output:
         vcf="results/annotated/all.snpeff.vcf.gz",
         tbi="results/annotated/all.snpeff.vcf.gz.tbi",
         csv="results/qc/snpeff/all.snpeff.csv",          # MultiQC-readable stats
         html="results/qc/snpeff/all.snpeff.summary.html",
+    params:
+        xmx=lambda wildcards, resources: int(resources.mem_mb * 0.85),
+    resources:
+        mem_mb=config["resources"]["annotate"]["mem_mb"],
     log:
         "logs/annotate/snpeff.log",
     conda:
         "../envs/snpeff.yaml"
     shell:
         r"""
-        ( snpEff -Xmx4g ann \
+        ( snpEff -Xmx{params.xmx}m ann \
               -dataDir "$(pwd)/{SNPEFF_DATADIR}" \
               -nodownload \
               -csvStats {output.csv} \

@@ -150,3 +150,12 @@ resources:
     mem_mb: 8000
   genotype:
     mem_mb: 8000
+  # The filtering rules (SelectVariants / VariantFiltration / MergeVcfs) run GATK
+  # over the whole cohort VCF. They previously declared no memory at all, so the
+  # JVM sized its heap from the cgroup limit (~25% of the container) rather than
+  # from anything the rule had reserved, and they cost nothing against the
+  # scheduler's budget -- meaning they could be co-scheduled without limit.
+  filtering:
+    mem_mb: 6000
+  annotate:
+    mem_mb: 6000           # snpEff; was a hardcoded -Xmx4g answering to nothing
