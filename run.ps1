@@ -96,7 +96,6 @@ if (-not $SnakemakeArgs -or $SnakemakeArgs.Count -eq 0) {
     $SnakemakeArgs = @('--cores', '8')
 }
 
-Write-Host "==> [$image] snakemake --use-conda $($SnakemakeArgs -join ' ')" -ForegroundColor Cyan
 # Allocate an interactive TTY only when STDIN is a real console. In a
 # non-interactive context (CI, background job) `-t` fails with
 # "the input device is not a TTY", so fall back to a plain batch run.
@@ -125,12 +124,51 @@ if ($env:WES_SCRATCH_BAMS) {
     Write-Host "==> scratch volumes ON: results/{mapped,dedup,bqsr} -> wes-{mapped,dedup,bqsr}" -ForegroundColor Cyan
 }
 
+# --- Translate the container limit into a Snakemake mem_mb budget -------------
+# The per-rule `resources: mem_mb` values in config.yaml are ADVISORY unless the
+# run also passes --resources mem_mb=<budget>. Without it Snakemake schedules
+# purely on cores, so two GATK jobs that each reserved 8 GB can be co-scheduled
+# inside a 16 GB container alongside the resident bwa index, and the OOM killer
+# decides the outcome. 90% leaves headroom for Snakemake itself.
+$memMib = switch -Regex ($dockerMem) {
+    '^(\d+)\s*[gG]$' { [int]$Matches[1] * 1024; break }
+    '^(\d+)\s*[mM]$' { [int]$Matches[1]; break }
+    default          { 16 * 1024 }
+}
+$memBudget = [int]($memMib * 0.9)
+
+# Preflight: a per-rule mem_mb larger than the whole budget is a hard Snakemake
+# error, and it surfaces only once that job becomes schedulable -- i.e. after
+# FastQC and trimming have already run -- with a message that blames pipes.
+# Catch it here, while we can still say what to do about it.
+$maxRuleMem = 0
+Get-Content (Join-Path $proj 'config\config.yaml') |
+    Select-String -Pattern '^\s+mem_mb:\s*(\d+)' |
+    ForEach-Object { $v = [int]$_.Matches[0].Groups[1].Value; if ($v -gt $maxRuleMem) { $maxRuleMem = $v } }
+if ($maxRuleMem -gt 0 -and $memBudget -lt $maxRuleMem) {
+    $needGib = [math]::Ceiling($maxRuleMem / 0.9 / 1024)
+    Write-Host "ERROR: container memory '$dockerMem' is too small for this config." -ForegroundColor Red
+    Write-Host "       Budget would be ${memBudget} MiB (90% of $memMib MiB), but the largest" -ForegroundColor Red
+    Write-Host "       rule in config/config.yaml reserves ${maxRuleMem} MiB." -ForegroundColor Red
+    Write-Host "       Set WES_DOCKER_MEMORY to at least ${needGib}g, or lower resources.*.mem_mb." -ForegroundColor Red
+    exit 1
+}
+
+# --resources must go LAST: it takes a variable-length list, so placing it before
+# the caller's arguments makes it swallow a positional target name.
+$extraArgs = @()
+if (-not ($SnakemakeArgs -contains '--resources')) {
+    $extraArgs += @('--resources', "mem_mb=$memBudget")
+}
+
+Write-Host "==> [$image] snakemake --use-conda $($SnakemakeArgs -join ' ') $($extraArgs -join ' ')" -ForegroundColor Cyan
+
 docker run --rm @ttyArgs --init `
     -v "${proj}:/workflow" `
     @scratchArgs `
     -w /workflow `
     --memory=$dockerMem `
     $image `
-    snakemake --use-conda --conda-prefix /opt/snakemake-envs @SnakemakeArgs
+    snakemake --use-conda --conda-prefix /opt/snakemake-envs @SnakemakeArgs @extraArgs
 
 exit $LASTEXITCODE

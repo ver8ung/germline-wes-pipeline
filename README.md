@@ -277,7 +277,7 @@ Both launchers read these; they are optional.
 
 | Variable | Default | Effect |
 |---|---|---|
-| `WES_DOCKER_MEMORY` | `16g` | Memory limit passed to `docker run`. Must fit inside the Docker Desktop / WSL2 VM limit. Lower it on a smaller machine, e.g. `12g`. |
+| `WES_DOCKER_MEMORY` | `16g` | Memory limit passed to `docker run`, and the basis for Snakemake's `--resources mem_mb` budget (90% of it). Must fit inside the Docker Desktop / WSL2 VM limit. Raise it for large multi-unit runs, e.g. `32g`. |
 | `WES_SCRATCH_BAMS` | unset | When set to `1`, mounts Docker **named volumes** over `results/{mapped,dedup,bqsr}` so heavy BAM I/O hits VM-native storage instead of the (slow) Windows bind mount. |
 
 `WES_SCRATCH_BAMS` has consequences worth knowing before you enable it:
@@ -292,11 +292,19 @@ Both launchers read these; they are optional.
   switching partway through.
 
 ```powershell
-$env:WES_DOCKER_MEMORY = '12g'      # PowerShell
+$env:WES_DOCKER_MEMORY = '32g'      # PowerShell
 ```
 ```bash
-WES_DOCKER_MEMORY=12g ./run.sh --cores 8    # bash
+WES_DOCKER_MEMORY=32g ./run.sh --cores 8    # bash
 ```
+
+> **There is a floor.** The launchers derive Snakemake's `--resources mem_mb`
+> budget from this value (90% of it), and refuse to start if the budget is smaller
+> than the largest single rule's reservation — `bwa_mem` reserves 12000 MiB, so
+> anything below 16g is rejected up front with a message naming the offending
+> rule. That check exists because the failure it replaces was miserable: Snakemake
+> only raises the error once the oversized job becomes schedulable, i.e. after
+> FastQC and trimming have already run, and the message blames pipes.
 
 ## Smoke test (built in)
 

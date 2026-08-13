@@ -75,12 +75,48 @@ fi
 # Memory limit, overridable. Must fit inside the Docker Desktop / WSL2 VM limit.
 DOCKER_MEM="${WES_DOCKER_MEMORY:-16g}"
 
+# --- Translate the container limit into a Snakemake mem_mb budget -------------
+# The per-rule `resources: mem_mb` values in config.yaml are ADVISORY unless the
+# run also passes --resources mem_mb=<budget>. Without it Snakemake schedules
+# purely on cores, so two GATK jobs that each reserved 8 GB can be co-scheduled
+# inside a 16 GB container alongside the resident bwa index, and the OOM killer
+# decides the outcome. 90% leaves headroom for Snakemake itself.
+case "$DOCKER_MEM" in
+  *[gG]) mem_mib=$(( ${DOCKER_MEM%[gG]} * 1024 )) ;;
+  *[mM]) mem_mib=${DOCKER_MEM%[mM]} ;;
+  *)     mem_mib=$(( 16 * 1024 )) ;;
+esac
+mem_budget=$(( mem_mib * 9 / 10 ))
+
+# Preflight: a per-rule mem_mb larger than the whole budget is a hard Snakemake
+# error that surfaces only once that job becomes schedulable, with a message that
+# blames pipes. Catch it here, while we can still say what to do about it.
+max_rule_mem=$(grep -oE '^[[:space:]]+mem_mb:[[:space:]]*[0-9]+' "$PROJ/config/config.yaml" |
+               grep -oE '[0-9]+$' | sort -n | tail -1)
+if [[ -n "${max_rule_mem:-}" ]] && (( mem_budget < max_rule_mem )); then
+  need_gib=$(( (max_rule_mem * 10 / 9 + 1023) / 1024 ))
+  {
+    echo "ERROR: container memory '$DOCKER_MEM' is too small for this config."
+    echo "       Budget would be ${mem_budget} MiB (90% of ${mem_mib} MiB), but the largest"
+    echo "       rule in config/config.yaml reserves ${max_rule_mem} MiB."
+    echo "       Set WES_DOCKER_MEMORY to at least ${need_gib}g, or lower resources.*.mem_mb."
+  } >&2
+  exit 1
+fi
+
+# --resources must go LAST: it takes a variable-length list, so placing it before
+# the caller's arguments makes it swallow a positional target name.
+extra_args=()
+if [[ " $* " != *" --resources "* ]]; then
+  extra_args=(--resources "mem_mb=$mem_budget")
+fi
+
 # Banner goes to stderr: on stdout it would be piped into whatever consumes the
 # run's output (again, `--dag | dot`) and corrupt it.
-echo "==> [$IMAGE] snakemake --use-conda $*" >&2
+echo "==> [$IMAGE] snakemake --use-conda $* ${extra_args[*]}" >&2
 exec docker run --rm "${tty_args[@]}" --init \
   -v "$PROJ:/workflow" \
   -w /workflow \
   "--memory=$DOCKER_MEM" \
   "$IMAGE" \
-  snakemake --use-conda --conda-prefix /opt/snakemake-envs "$@"
+  snakemake --use-conda --conda-prefix /opt/snakemake-envs "$@" "${extra_args[@]}"
