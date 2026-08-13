@@ -31,7 +31,18 @@ rule select_variants:
     wildcard_constraints:
         vartype="snvs|indels",
     params:
-        select=lambda wc: "SNP" if wc.vartype == "snvs" else "INDEL",
+        # Every variant class GenotypeGVCFs can emit must land in exactly one of
+        # these two branches, or it silently disappears at merge_filtered: a class
+        # matching neither selection is written to neither temp VCF, both rules
+        # still succeed, and nothing warns. MIXED (multiallelic sites carrying both
+        # a SNP and an indel allele) and MNP were being lost that way.
+        # MIXED goes with indels because indel thresholds are the safe ones to
+        # apply to a record that contains an indel allele; MNP goes with SNPs.
+        select=lambda wc: (
+            "--select-type-to-include SNP --select-type-to-include MNP"
+            if wc.vartype == "snvs"
+            else "--select-type-to-include INDEL --select-type-to-include MIXED"
+        ),
     log:
         "logs/filter/select_{vartype}.log",
     conda:
@@ -40,7 +51,7 @@ rule select_variants:
         r"""
         gatk SelectVariants \
             -R {input.fasta} -V {input.vcf} \
-            --select-type-to-include {params.select} \
+            {params.select} \
             -O {output.vcf} 2> {log}
         """
 

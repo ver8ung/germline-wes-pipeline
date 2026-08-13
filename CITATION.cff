@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+title: >-
+  ngs-germline-wes: a reproducible germline whole-exome variant calling pipeline
+message: If you use this pipeline in your work, please cite it.
+type: software
+authors:
+  - alias: ver8ung
+repository-code: https://github.com/ver8ung/germline-wes-pipeline
+abstract: >-
+  Germline short-variant calling from raw paired-end FASTQ to annotated VCF,
+  following GATK best practices on GRCh38. Orchestrated with Snakemake, with
+  every tool pinned in its own conda environment and the whole toolchain baked
+  into a single Docker image so runs reproduce across Windows, macOS, Linux and
+  HPC. Includes switchable exome capture-kit target sets and hap.py benchmarking
+  against Genome in a Bottle truth sets.
+keywords:
+  - bioinformatics
+  - variant-calling
+  - whole-exome-sequencing
+  - GATK
+  - snakemake
+  - GRCh38
+  - reproducibility
+license: MIT

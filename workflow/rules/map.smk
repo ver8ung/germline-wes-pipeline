@@ -24,9 +24,20 @@ rule bwa_mem:
         "../envs/bwa.yaml"
     shell:
         r"""
-        ( bwa mem -M -t {threads} -R '{params.rg}' \
+        # -K fixes the batch size bwa processes at once. Without it the batch is
+        # 10000000 * nThreads, so the per-batch insert-size model -- and therefore
+        # MAPQ and pair rescue near batch boundaries -- changes with --cores, and
+        # the same input yields different calls. Reproducibility requires it.
+        # -Y (soft-clip supplementary) rather than -M (mark them secondary): GATK4
+        # handles proper supplementary records natively; -M is the legacy Picard
+        # compatibility mode and hides them from duplicate marking.
+        # samtools sort: -m caps per-thread memory (default 768M is multiplied by
+        # {threads} on top of the resident bwa index) and -T keeps spill files off
+        # the slow bind mount.
+        ( bwa mem -Y -K 100000000 -t {threads} -R '{params.rg}' \
               {input.fasta} {input.r1} {input.r2} \
-          | samtools sort -@ {threads} -o {output} - ) 2> {log}
+          | samtools sort -@ {threads} -m 1G -T {resources.tmpdir}/{wildcards.sample}.{wildcards.unit}.sort \
+                -o {output} - ) 2> {log}
         """
 
 

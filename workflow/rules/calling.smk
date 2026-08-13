@@ -77,6 +77,7 @@ rule genotype_gvcfs:
         tbi="results/genotyped/cohort.vcf.gz.tbi",
     params:
         xmx=lambda wildcards, resources: int(resources.mem_mb * 0.85),
+        padding=PADDING,
     resources:
         mem_mb=config["resources"]["genotype"]["mem_mb"],
     log:
@@ -87,6 +88,6 @@ rule genotype_gvcfs:
         r"""
         gatk --java-options "-Xmx{params.xmx}m" GenotypeGVCFs \
             -R {input.fasta} -V {input.gvcf} \
-            -L {input.intervals} \
+            -L {input.intervals} --interval-padding {params.padding} \
             -O {output.vcf} 2> {log}
         """
