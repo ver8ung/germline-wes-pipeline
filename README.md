@@ -44,8 +44,9 @@ Windows, macOS, Linux, or an HPC node.
 | Recalibrate | GATK BQSR | `results/bqsr/*.recal.bam` |
 | Call | GATK HaplotypeCaller (GVCF) | `results/called/*.g.vcf.gz` |
 | Joint genotype | CombineGVCFs + GenotypeGVCFs | `results/genotyped/cohort.vcf.gz` |
-| Filter | GATK hard-filter | `results/filtered/all.filtered.vcf.gz` |
-| Annotate | SnpEff (+ SnpSift) | **`results/annotated/all.annotated.vcf.gz`** |
+| Filter | GATK hard-filter | `results/filtered/all.filtered.vcf.gz` (flagged) |
+| Select PASS | bcftools | `results/filtered/all.pass.vcf.gz` |
+| Annotate | SnpEff (+ SnpSift) | **`results/annotated/all.annotated.vcf.gz`** (PASS-only) |
 | Report | MultiQC | `results/qc/multiqc_report.html` |
 
 ---
@@ -216,11 +217,23 @@ those are bind-mounted and take effect on the next run.
 ## Outputs
 
 - **`results/annotated/all.annotated.vcf.gz`** — the headline: joint-called,
-  hard-filtered, functionally annotated multi-sample VCF (+ `.tbi`).
-  Records that fail a hard filter are **tagged in `FILTER`, not dropped** — select
-  `PASS` downstream if you want only high-confidence calls.
+  hard-filtered, functionally annotated multi-sample VCF (+ `.tbi`). This is
+  **PASS-only**: records that failed a hard filter are not in it. Use it directly;
+  no further filtering is needed.
+- **`results/filtered/all.filtered.vcf.gz`** — the same callset *before* PASS
+  selection, with every record present and its `FILTER` tag intact. Reach for this
+  when you want to see what was rejected and why — computing a filter-failure rate,
+  or hunting rescue candidates near a threshold. `results/filtered/all.pass.vcf.gz`
+  is the PASS subset that annotation consumes.
 - **`results/qc/multiqc_report.html`** — one report aggregating FastQC, fastp,
   MarkDuplicates, samtools, bcftools, and SnpEff metrics across all samples.
+
+  > Two scopes appear in the outputs, deliberately. `bcftools stats` (and therefore
+  > the MultiQC variant counts) describes the **PASS** callset, matching the
+  > deliverable. The hap.py benchmark scores the **flagged** VCF, because hap.py
+  > reads the `FILTER` column itself and reports ALL and PASS rows separately — it
+  > needs the rejected records to do that. So the two will not agree, and should
+  > not.
 - Intermediates under `results/` (recalibrated BAMs, per-sample GVCFs, the raw
   genotyped VCF). Per-rule logs under `logs/`.
 

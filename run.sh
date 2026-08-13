@@ -81,10 +81,21 @@ DOCKER_MEM="${WES_DOCKER_MEMORY:-16g}"
 # purely on cores, so two GATK jobs that each reserved 8 GB can be co-scheduled
 # inside a 16 GB container alongside the resident bwa index, and the OOM killer
 # decides the outcome. 90% leaves headroom for Snakemake itself.
-case "$DOCKER_MEM" in
-  *[gG]) mem_mib=$(( ${DOCKER_MEM%[gG]} * 1024 )) ;;
-  *[mM]) mem_mib=${DOCKER_MEM%[mM]} ;;
-  *)     mem_mib=$(( 16 * 1024 )) ;;
+# Validate rather than silently defaulting. Docker accepts spellings this parser
+# did not recognise ('8gb', '1.5g'); falling back to 16 GiB then told Snakemake it
+# could co-schedule ~14.7 GB inside an 8 GB container -- the exact OOM the budget
+# exists to prevent, with the preflight below reporting all clear. '1.5g' also
+# crashed bash arithmetic with a raw "invalid arithmetic operator".
+if [[ ! "$DOCKER_MEM" =~ ^([0-9]+)[[:space:]]*([gGmM])[bB]?$ ]]; then
+  {
+    echo "ERROR: WES_DOCKER_MEMORY='$DOCKER_MEM' is not a form this launcher can size."
+    echo "       Use an integer with a g or m suffix, e.g. 16g, 32g, 24000m."
+  } >&2
+  exit 1
+fi
+case "${BASH_REMATCH[2]}" in
+  g|G) mem_mib=$(( BASH_REMATCH[1] * 1024 )) ;;
+  *)   mem_mib=$(( BASH_REMATCH[1] )) ;;
 esac
 mem_budget=$(( mem_mib * 9 / 10 ))
 

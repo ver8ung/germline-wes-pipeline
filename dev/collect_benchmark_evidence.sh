@@ -33,6 +33,18 @@ fi
   exit 1
 }
 
+# --- Capture git state BEFORE writing anything ------------------------------
+# Order matters. benchmarks/ is tracked (the whole point is that it is committed),
+# so creating OUTDIR below makes `git status --porcelain` non-empty. Reading it
+# afterwards stamped EVERY provenance record as dirty, including runs from a
+# pristine checkout -- turning the one field that certifies the numbers into a
+# constant, and making a genuinely dirty run indistinguishable from a clean one.
+SHA="$(git rev-parse HEAD 2>/dev/null || echo 'not a git checkout')"
+DIRTY=""
+if [ -n "$(git status --porcelain -- . ':(exclude)benchmarks' 2>/dev/null)" ]; then
+  DIRTY="  **(working tree was DIRTY -- these numbers do not describe a clean commit)**"
+fi
+
 mkdir -p "$OUTDIR"
 cp "${PREFIX}.summary.csv"  "$OUTDIR/happy.summary.csv"
 [ -f "${PREFIX}.extended.csv" ] && cp "${PREFIX}.extended.csv" "$OUTDIR/happy.extended.csv"
@@ -47,14 +59,24 @@ for f in results/qc/samtools/*.stats.txt results/qc/samtools/*.flagstat.txt \
 done
 
 # --- Provenance -------------------------------------------------------------
-SHA="$(git rev-parse HEAD 2>/dev/null || echo 'not a git checkout')"
-DIRTY=""
-[ -n "$(git status --porcelain 2>/dev/null)" ] && DIRTY="  **(working tree was DIRTY -- these numbers do not describe a clean commit)**"
+# Every grep here needs `|| true`: under `set -euo pipefail` a no-match exit 1
+# propagates through the pipe and kills the script -- silently, and only AFTER
+# the results have been copied, leaving a populated benchmarks/ directory with
+# no provenance at all. That is strictly worse than not running the script.
+bed="$(grep -E '^\s+bed:' config/config.yaml | head -1 | awk '{print $2}' || true)"
+units="$(grep -E '^units:' config/config.yaml | head -1 | awk '{print $2}' || true)"
+[ -n "$bed" ]   || { echo "FATAL: could not read intervals.bed from config/config.yaml" >&2; exit 1; }
+[ -n "$units" ] || { echo "FATAL: could not read units from config/config.yaml" >&2; exit 1; }
 
-# Read the capture BED and units sheet actually in effect, overlay included.
-bed="$(grep -E '^\s+bed:' config/config.yaml | head -1 | awk '{print $2}')"
-units="$(grep -E '^units:' config/config.yaml | head -1 | awk '{print $2}')"
-if [ -n "$CONFIGFILE" ] && [ -f "$CONFIGFILE" ]; then
+# A label implies an overlay. If the conventional path is missing, the base
+# config's BED and units would be recorded while the table still named the
+# overlay -- a provenance record describing a run that never happened.
+if [ -n "$CONFIGFILE" ]; then
+  [ -f "$CONFIGFILE" ] || {
+    echo "FATAL: label '$LABEL' given but $CONFIGFILE does not exist." >&2
+    echo "       Provenance would name an overlay that was never read." >&2
+    exit 1
+  }
   o_bed="$(grep -E '^\s+bed:' "$CONFIGFILE" | head -1 | awk '{print $2}' || true)"
   o_units="$(grep -E '^units:' "$CONFIGFILE" | head -1 | awk '{print $2}' || true)"
   [ -n "$o_bed" ]   && bed="$o_bed"

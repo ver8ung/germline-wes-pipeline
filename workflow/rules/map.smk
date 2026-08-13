@@ -31,12 +31,16 @@ rule bwa_mem:
         # -Y (soft-clip supplementary) rather than -M (mark them secondary): GATK4
         # handles proper supplementary records natively; -M is the legacy Picard
         # compatibility mode and hides them from duplicate marking.
-        # samtools sort: -m caps per-thread memory (default 768M is multiplied by
-        # {threads} on top of the resident bwa index) and -T keeps spill files off
-        # the slow bind mount.
+        # samtools sort -m is PER THREAD and is multiplied by -@ {threads}, so it
+        # must be set well below the rule's mem_mb, not near it. The budget here:
+        # the resident bwa index is ~6 GiB (see config resources.bwa_mem comment),
+        # leaving ~6 GiB of the 12000 MiB reservation for sorting, so 512M x 8
+        # threads = 4 GiB keeps a margin. Do NOT raise this to 1G: 8 x 1 GiB + the
+        # index peaks around 14.3 GiB and OOM-kills inside a 16 GiB container.
+        # -T keeps spill files off the slow bind mount.
         ( bwa mem -Y -K 100000000 -t {threads} -R '{params.rg}' \
               {input.fasta} {input.r1} {input.r2} \
-          | samtools sort -@ {threads} -m 1G -T {resources.tmpdir}/{wildcards.sample}.{wildcards.unit}.sort \
+          | samtools sort -@ {threads} -m 512M -T {resources.tmpdir}/{wildcards.sample}.{wildcards.unit}.sort \
                 -o {output} - ) 2> {log}
         """
 

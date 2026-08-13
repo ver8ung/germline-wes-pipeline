@@ -77,8 +77,18 @@ if (-not (docker images -q $image)) {
 }
 
 # --- Staleness guard: warn if env files drifted from what the image baked ---
+# $ErrorActionPreference='Stop' plus `2>$null` on a NATIVE exe is a trap in
+# PS 5.1: each stderr line comes back as a NativeCommandError that terminates the
+# script even when the command exited 0. Any incidental docker chatter ("Unable
+# to find image ... locally", a WSL2 integration notice) would kill the launcher
+# before Snakemake ever started, and the warning branch below would be
+# unreachable. Drop to Continue for the probe, then restore.
+$prevEAP = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 docker run --rm -v "${proj}:/workflow" $image check-bake 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$bakeExit = $LASTEXITCODE
+$ErrorActionPreference = $prevEAP
+if ($bakeExit -ne 0) {
     Write-Host "WARNING: workflow/envs/*.yaml changed since image '$image' was built." -ForegroundColor Yellow
     Write-Host "         Per-rule envs would be rebuilt every run (slow, needs network)." -ForegroundColor Yellow
     Write-Host "         Re-bake them:  docker rmi $image ; then re-run this script." -ForegroundColor Yellow
@@ -130,12 +140,25 @@ if ($env:WES_SCRATCH_BAMS) {
 # purely on cores, so two GATK jobs that each reserved 8 GB can be co-scheduled
 # inside a 16 GB container alongside the resident bwa index, and the OOM killer
 # decides the outcome. 90% leaves headroom for Snakemake itself.
-$memMib = switch -Regex ($dockerMem) {
-    '^(\d+)\s*[gG]$' { [int]$Matches[1] * 1024; break }
-    '^(\d+)\s*[mM]$' { [int]$Matches[1]; break }
-    default          { 16 * 1024 }
+# Validate rather than silently defaulting. Docker accepts spellings this parser
+# did not recognise ('8gb', '1.5g'); falling back to 16 GiB then told Snakemake it
+# could co-schedule ~14.7 GB inside an 8 GB container -- the exact OOM the budget
+# exists to prevent, with the preflight below reporting all clear.
+if ($dockerMem -notmatch '^(\d+)\s*([gGmM])[bB]?$') {
+    Write-Host "ERROR: WES_DOCKER_MEMORY='$dockerMem' is not a form this launcher can size." -ForegroundColor Red
+    Write-Host "       Use an integer with a g or m suffix, e.g. 16g, 32g, 24000m." -ForegroundColor Red
+    exit 1
 }
-$memBudget = [int]($memMib * 0.9)
+# Read both capture groups out of $Matches BEFORE any other -match runs. The
+# -match operator overwrites $Matches on success, so testing the unit with a
+# second -match clobbers the number: '16g' silently became a 0 MiB budget, while
+# '24000m' survived only because a FAILED match leaves $Matches untouched.
+$memNum = [int]$Matches[1]
+$memUnit = $Matches[2].ToLower()
+$memMib = if ($memUnit -eq 'g') { $memNum * 1024 } else { $memNum }
+# Floor, not [int] rounding: run.sh computes mem_mib*9/10 in integer arithmetic,
+# which truncates. [int] rounds, so 16g gave 14746 here against 14745 there.
+$memBudget = [int][math]::Floor($memMib * 0.9)
 
 # Preflight: a per-rule mem_mb larger than the whole budget is a hard Snakemake
 # error, and it surfaces only once that job becomes schedulable -- i.e. after
