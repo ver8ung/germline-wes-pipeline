@@ -12,7 +12,7 @@ _BENCH_BASE = config["benchmark"]["base_url"]
 
 # Optional run label so multiple experiments (e.g. different capture kits) don't
 # overwrite each other's hap.py output. Unset -> "results/benchmark/happy.*"
-# (the Docker pre-bake target); set via an overlay (config/garvan_nextera.yaml).
+# (the Docker pre-bake target); set via an overlay (config/twist_onso.yaml).
 _BENCH_LABEL = config["benchmark"].get("label", "")
 _BENCH_PREFIX = "results/benchmark/happy" + (f".{_BENCH_LABEL}" if _BENCH_LABEL else "")
 

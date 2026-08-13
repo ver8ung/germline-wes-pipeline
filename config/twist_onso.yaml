@@ -1,0 +1,30 @@
+# =============================================================================
+# Overlay config for the Twist-Onso NA12878 run (8-plex pool, ~780x).
+# Merged on top of config/config.yaml; only the keys below are overridden.
+#
+# Usage (put --cores right after the configfile value, so Snakemake 8's greedy
+# --configfile does not swallow the target):
+#   .\run.ps1 --configfile config/twist_onso.yaml --cores 8 all benchmark
+#
+# NOTE: the FASTQs this needs are not publicly documented -- see the header of
+# config/units.twist_onso.tsv. The DEFAULT config (Garvan/Nextera) is the one a
+# new user can actually run.
+#
+# COHORT-LEVEL OUTPUTS COLLIDE. Only the hap.py output is namespaced by the
+# label below. results/genotyped/, results/filtered/ and results/annotated/ are
+# cohort-level and share fixed paths with the default run, and both runs call
+# the same sample name (NA12878), so results/bqsr/NA12878.recal.bam collides
+# too. Run the two configs SEQUENTIALLY, and copy results/annotated and
+# results/filtered aside between them if you need to keep both.
+# =============================================================================
+
+units: config/units.twist_onso.tsv
+
+# Twist Exome 2.0.2 -- the closest public design to the 2.1 kit this data used.
+intervals:
+  bed: resources/intervals/twist_exome_v2.GRCh38.bed
+
+# Namespace this run's hap.py output so it does not overwrite the default run's
+# results/benchmark/happy.* files.
+benchmark:
+  label: twist_onso

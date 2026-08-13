@@ -1,16 +1,21 @@
-# Live run: NA12878, PacBio Onso (PE100), Twist Exome 2.x capture.
-# Scored against the Twist Exome 2.0.2 capture BED (config intervals.bed = twist).
-# FULL 8-PLEX POOL: all 8 libraries are the SAME sample (NA12878), so they are
-# 8 sequencing units of one sample -> pooled to raise depth and lift the
-# low-coverage capture targets (the dominant recall limiter at 1 replicate).
-# PL:ILLUMINA — Onso emits Illumina-compatible short reads; the PL tag is cosmetic
-# for this short-read pipeline (bwa-mem / GATK do not branch on it here).
+# DEFAULT run: NA12878 (GIAB HG001) captured with the Illumina Nextera Rapid
+# Capture Expanded Exome, sequenced on a HiSeq 2500 (2x101).
+#
+# This is the default because it is the only NA12878 exome used here that anyone
+# can obtain: the FASTQs are public on the NCBI GIAB FTP, and the matching
+# capture BED is built by `run get_capture_bed`. Kit and BED therefore agree out
+# of the box, which is what makes the shipped benchmark meaningful.
+#
+# Download (~16 GB, see README "Evaluating against GIAB"):
+#   https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/NA12878/Garvan_NA12878_HG001_HiSeq_Exome/
+#
+# Two libraries (NIST7035, NIST7086), two lanes each = 4 units of one sample,
+# merged per sample after alignment.
+#
+# To run your OWN data instead, replace these rows and point intervals.bed in
+# config/config.yaml at your kit's GRCh38 target BED.
 sample	unit	platform	fq1	fq2
-NA12878	onso01	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_01_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_01_R2.fastq.gz
-NA12878	onso02	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_02_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_02_R2.fastq.gz
-NA12878	onso03	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_03_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_03_R2.fastq.gz
-NA12878	onso04	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_04_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_04_R2.fastq.gz
-NA12878	onso05	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_05_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_05_R2.fastq.gz
-NA12878	onso06	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_06_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_06_R2.fastq.gz
-NA12878	onso07	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_07_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_07_R2.fastq.gz
-NA12878	onso08	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_08_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_08_R2.fastq.gz
+NA12878	7035_L001	ILLUMINA	data/garvan/NIST7035_TAAGGCGA_L001_R1_001.fastq.gz	data/garvan/NIST7035_TAAGGCGA_L001_R2_001.fastq.gz
+NA12878	7035_L002	ILLUMINA	data/garvan/NIST7035_TAAGGCGA_L002_R1_001.fastq.gz	data/garvan/NIST7035_TAAGGCGA_L002_R2_001.fastq.gz
+NA12878	7086_L001	ILLUMINA	data/garvan/NIST7086_CGTACTAG_L001_R1_001.fastq.gz	data/garvan/NIST7086_CGTACTAG_L001_R2_001.fastq.gz
+NA12878	7086_L002	ILLUMINA	data/garvan/NIST7086_CGTACTAG_L002_R1_001.fastq.gz	data/garvan/NIST7086_CGTACTAG_L002_R2_001.fastq.gz

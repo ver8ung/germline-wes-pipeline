@@ -6,9 +6,12 @@
 
 # --- Sample sheets ----------------------------------------------------------
 samples: config/samples.tsv      # one row per biological sample
-# Primary live run = NA12878 / Twist Exome 2.0 (PacBio Onso), matched to the
-# active Twist BED below. The Garvan/Nextera cross-validation run overrides this
-# (and intervals.bed) via:  run --configfile config/garvan_nextera.yaml ...
+# DEFAULT run = NA12878 / Nextera Expanded Exome (Garvan HiSeq), matched to the
+# active Nextera BED below. This pairing is the default because the FASTQs are
+# publicly downloadable and the BED is built from the kit that produced them, so
+# a new user gets a meaningful benchmark without owning private data.
+# The higher-depth Twist-Onso run overrides this (and intervals.bed) via:
+#   .\run.ps1 --configfile config/twist_onso.yaml --cores 8 all benchmark
 units:   config/units.tsv        # one row per sequencing unit (lane/library) of a sample
 
 # --- Reference genome -------------------------------------------------------
@@ -44,22 +47,28 @@ intervals:
   # GRCh38 capture targets, chr-named. FOUR switchable providers are wired up
   # (see the `capture_bed` section + workflow/rules/capture_bed.smk);
   # `get_capture_bed` builds whichever path this points at. Switch by repointing:
-  #   - Twist Exome 2.0      (native GRCh38, downloaded)  <-- ACTIVE, ~36.5 Mb
-  #       resources/intervals/twist_exome_v2.GRCh38.bed
-  #   - Illumina Exome 2.5   (Twist-built, native GRCh38)         ~37.5 Mb
-  #       resources/intervals/illumina_exome_v2.5.GRCh38.bed
-  #   - IDT xGen Exome v2    (independent design, native GRCh38)  ~34.2 Mb
-  #       resources/intervals/idt_xgen_exome_v2.GRCh38.bed
-  #   - Nextera Expanded     (hg19 BED -> lifted to GRCh38)       ~62 Mb
+  #   - Nextera Expanded     (hg19 BED -> lifted to GRCh38)  <-- ACTIVE, ~62 Mb
   #       resources/intervals/nextera_expandedexome.GRCh38.bed
+  #   - Twist Exome 2.0      (native GRCh38, downloaded)           ~36.5 Mb
+  #       resources/intervals/twist_exome_v2.GRCh38.bed
+  #   - Illumina Exome 2.5   (Twist-built, native GRCh38)          ~37.5 Mb
+  #       resources/intervals/illumina_exome_v2.5.GRCh38.bed
+  #   - IDT xGen Exome v2    (independent design, native GRCh38)   ~34.2 Mb
+  #       resources/intervals/idt_xgen_exome_v2.GRCh38.bed
   # NOTE: Twist 2.0 and Illumina 2.5 are the SAME design family (~99% identical;
   # 2.5 is newer / ~1 Mb larger). IDT is an independent design (~87% overlap) —
   # the useful "different vendor" cross-check. Nextera matches the kit that
   # produced the GIAB NA12878 eval data, so it is the "matched" choice for
   # benchmarking; the native exomes are cleaner defaults for your OWN live runs.
   # For any other kit, just drop its GRCh38 BED here instead.
-  bed:     resources/intervals/twist_exome_v2.GRCh38.bed
-  padding: 100        # bp added on each side of every target (captures splice flanks)
+  bed:     resources/intervals/nextera_expandedexome.GRCh38.bed
+  # bp added on each side of every target (captures splice flanks). Applied where
+  # intervals are CONSUMED -- BaseRecalibrator, ApplyBQSR, HaplotypeCaller and
+  # GenotypeGVCFs each pass --interval-padding -- so the interval_list itself
+  # stays raw. Note hap.py scores against the unpadded BED, so variants called in
+  # the flank are correctly outside the evaluation region rather than counted
+  # as false positives.
+  padding: 100
 
 # --- Capture-BED providers --------------------------------------------------
 # capture_bed.smk turns any of these sources into a 3-col, chr-named GRCh38 BED

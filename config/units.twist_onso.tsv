@@ -1,0 +1,29 @@
+# Secondary run: NA12878, PacBio Onso (PE100), Twist Exome 2.x capture.
+# Selected by:  run --configfile config/twist_onso.yaml --cores 8 all benchmark
+#
+# HEADS UP: unlike the default Garvan/Nextera sheet, these FASTQs are NOT
+# publicly documented anywhere in this repo -- they were obtained locally and no
+# download URL is known. If you are not the author, you cannot fetch this data;
+# use the default config instead. Kept here because the 8-plex pool is the
+# highest-depth NA12878 exome available to this project and is useful as a
+# depth-sensitivity comparison.
+#
+# FULL 8-PLEX POOL: all 8 libraries are the SAME sample (NA12878), so they are
+# 8 sequencing units of one sample -> pooled to raise depth.
+# PL:ILLUMINA - Onso emits Illumina-compatible short reads; the PL tag is
+# cosmetic for this short-read pipeline (bwa-mem / GATK do not branch on it).
+#
+# NOTE ON KIT MATCHING: this data is Twist Exome 2.1 (Exome2pt1_STv2_EFv2) but
+# the BED that config/twist_onso.yaml selects is Twist 2.0.2 -- the closest
+# public design. They are not identical, so regions enriched by 2.1 but absent
+# from 2.0.2 (and vice versa) contribute apparent false negatives that are a
+# capture artefact, not a calling error.
+sample	unit	platform	fq1	fq2
+NA12878	onso01	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_01_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_01_R2.fastq.gz
+NA12878	onso02	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_02_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_02_R2.fastq.gz
+NA12878	onso03	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_03_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_03_R2.fastq.gz
+NA12878	onso04	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_04_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_04_R2.fastq.gz
+NA12878	onso05	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_05_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_05_R2.fastq.gz
+NA12878	onso06	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_06_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_06_R2.fastq.gz
+NA12878	onso07	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_07_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_07_R2.fastq.gz
+NA12878	onso08	ILLUMINA	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_08_R1.fastq.gz	data/twist_onso/Exome2pt1_STv2_EFv2_NA12878_8-plex_08_R2.fastq.gz

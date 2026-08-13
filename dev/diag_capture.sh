@@ -1,32 +1,67 @@
 #!/usr/bin/env bash
-# Ad-hoc diagnosis: is the NA12878 (Twist-Onso) recall loss capture-driven
-# (truth variants in uncovered target regions) or pipeline-driven (covered
-# regions where we mis-/under-called or over-filtered)?
+# Callable-region diagnosis: is a recall deficit capture-driven (truth variants
+# sitting in target regions the capture never covered) or pipeline-driven
+# (covered regions that were mis-called, under-called or over-filtered)?
+#
+# It derives the actually-callable region from read depth in the recalibrated
+# BAM, then attributes every hap.py false negative to "uncovered" or "covered".
+# A high uncovered fraction means the caller is at its ceiling and more depth or
+# a different BED will not help; a high covered fraction points at the pipeline.
+#
+# THIS IS NOT PART OF THE PIPELINE. It is an ad-hoc analysis script that runs
+# inside the project's container, against results a run has already produced.
+#
+# Usage (from the repo root, after a run + `benchmark` have completed):
+#
+#   docker run --rm -v "$PWD:/workflow" -w /workflow ngs-germline-wes:latest \
+#       bash dev/diag_capture.sh
+#
+#   # for a labelled run (see config/twist_onso.yaml):
+#   docker run --rm -v "$PWD:/workflow" -w /workflow ngs-germline-wes:latest \
+#       bash -c 'LABEL=twist_onso BED=resources/intervals/twist_exome_v2.GRCh38.bed \
+#                bash dev/diag_capture.sh'
+#
+# If the run used the WES_SCRATCH_BAMS scratch volumes, results/bqsr lives on a
+# Docker volume rather than the bind mount, so add:
+#   --mount type=volume,source=wes-bqsr,target=/workflow/results/bqsr
 set -euo pipefail
-cd /workflow
 
-BAM=results/bqsr/NA12878.recal.bam
-HAPPY=results/benchmark/happy.vcf.gz
-TWIST=resources/intervals/twist_exome_v2.GRCh38.bed
-CONF=resources/benchmark/HG001_GRCh38_1_22_v4.2.1_benchmark.bed
+# LABEL selects which hap.py output to read. Empty (the default) = the
+# unlabelled output of the default config; otherwise happy.<LABEL>.*
+LABEL="${LABEL:-}"
+BED="${BED:-resources/intervals/nextera_expandedexome.GRCh38.bed}"
+BAM="${BAM:-results/bqsr/NA12878.recal.bam}"
+CONF="${CONF:-resources/benchmark/HG001_GRCh38_1_22_v4.2.1_benchmark.bed}"
+
+if [ -n "$LABEL" ]; then
+  HAPPY="results/benchmark/happy.${LABEL}.vcf.gz"
+else
+  HAPPY="results/benchmark/happy.vcf.gz"
+fi
 
 SAMTOOLS=$(ls /opt/snakemake-envs/*/bin/samtools 2>/dev/null | head -1 || true)
 BEDTOOLS=$(ls /opt/snakemake-envs/*/bin/bedtools 2>/dev/null | head -1 || true)
+echo "LABEL=${LABEL:-<none>}"
+echo "BED=$BED"
+echo "HAPPY=$HAPPY"
 echo "TOOL_samtools=$SAMTOOLS"
 echo "TOOL_bedtools=$BEDTOOLS"
 [ -n "$SAMTOOLS" ] || { echo "FATAL: samtools not in baked envs"; exit 3; }
 [ -n "$BEDTOOLS" ] || { echo "FATAL: bedtools not in baked envs"; exit 3; }
+[ -f "$BED"   ] || { echo "FATAL: $BED not found (run get_capture_bed)"; exit 3; }
+[ -f "$BAM"   ] || { echo "FATAL: $BAM not found (if WES_SCRATCH_BAMS was used, mount the wes-bqsr volume at /workflow/results/bqsr)"; exit 3; }
+[ -f "$HAPPY" ] || { echo "FATAL: $HAPPY not found (run the 'benchmark' target first; set LABEL= if the run was labelled)"; exit 3; }
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 bp() { awk '{s+=$3-$2} END{printf "%d", s+0}' "$1"; }
 
-# --- eval region = Twist targets ∩ GIAB confident (what hap.py scored over) ---
-sort -k1,1 -k2,2n "$TWIST" > "$TMP/twist.sorted"
-sort -k1,1 -k2,2n "$CONF"  > "$TMP/conf.sorted"
-"$BEDTOOLS" intersect -a "$TMP/twist.sorted" -b "$TMP/conf.sorted" \
+# --- eval region = capture targets ∩ GIAB confident (what hap.py scored over) ---
+sort -k1,1 -k2,2n "$BED"  > "$TMP/bed.sorted"
+sort -k1,1 -k2,2n "$CONF" > "$TMP/conf.sorted"
+"$BEDTOOLS" intersect -a "$TMP/bed.sorted" -b "$TMP/conf.sorted" \
   | sort -k1,1 -k2,2n | "$BEDTOOLS" merge -i - > "$TMP/eval.bed"
-TWIST_BP=$(bp "$TMP/twist.sorted"); EVAL_BP=$(bp "$TMP/eval.bed")
-echo "TWIST_BP=$TWIST_BP"
+BED_BP=$(bp "$TMP/bed.sorted"); EVAL_BP=$(bp "$TMP/eval.bed")
+echo "TARGET_BP=$BED_BP"
 echo "EVAL_BP=$EVAL_BP"
 
 # --- callable bp within eval from actual read depth (MQ>=20, exclude dups) ---
