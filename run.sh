@@ -17,15 +17,24 @@ set -euo pipefail
 PROJ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="ngs-germline-wes"
 
-# --- Image tag: git short sha (+ -dirty), else content hash of image inputs ---
-tag="$(git -C "$PROJ" rev-parse --short=12 HEAD 2>/dev/null || true)"
-if [[ -n "$tag" ]]; then
-  [[ -n "$(git -C "$PROJ" status --porcelain 2>/dev/null)" ]] && tag="${tag}-dirty"
-  tag="git-${tag}"
-else
-  # shellcheck disable=SC2012
-  tag="src-$(cat $(ls "$PROJ"/workflow/envs/*.yaml | sort) "$PROJ/docker/Dockerfile" | sha256sum | cut -c1-12)"
-fi
+# --- Image tag: content hash of exactly the files that determine image content ---
+# Deliberately NOT the git commit SHA. The image is built from the Dockerfile, the
+# per-rule env YAMLs and the base image tag, and nothing else; tagging by commit
+# meant every commit invalidated the tag and triggered a needless 15-30 min
+# rebuild, while two commits with identical image inputs pointlessly built twice.
+#
+# MUST match Get-ContentTag in run.ps1 byte for byte, or the same tree builds two
+# different images on Windows vs Linux. Shared contract: sort inputs by relative
+# POSIX path, cat their raw bytes in that order, one sha256, lowercase, first 12.
+# base-image.txt is included because it is fed to the build as --build-arg BASE;
+# leaving it out meant re-pinning the base silently reused a stale image.
+tag="src-$(
+  {
+    find "$PROJ/workflow/envs" -name '*.yaml' -print0 | sort -z |
+      xargs -0 cat
+    cat "$PROJ/docker/Dockerfile" "$PROJ/docker/base-image.txt"
+  } | sha256sum | cut -c1-12
+)"
 IMAGE="$REPO:$tag"
 
 # --- Build this exact tag if it isn't present yet ---
@@ -55,10 +64,23 @@ if [[ $# -eq 0 ]]; then
   set -- --cores 8
 fi
 
-echo "==> [$IMAGE] snakemake --use-conda $*"
-exec docker run --rm -it --init \
+# --- Only allocate a TTY when stdin actually is one. Hardcoding -it breaks any
+# --- redirected use, e.g. the documented `./run.sh --dag | dot -Tsvg > dag.svg`,
+# --- which Docker aborts with "the input device is not a TTY".
+tty_args=()
+if [[ -t 0 ]]; then
+  tty_args=(-it)
+fi
+
+# Memory limit, overridable. Must fit inside the Docker Desktop / WSL2 VM limit.
+DOCKER_MEM="${WES_DOCKER_MEMORY:-16g}"
+
+# Banner goes to stderr: on stdout it would be piped into whatever consumes the
+# run's output (again, `--dag | dot`) and corrupt it.
+echo "==> [$IMAGE] snakemake --use-conda $*" >&2
+exec docker run --rm "${tty_args[@]}" --init \
   -v "$PROJ:/workflow" \
   -w /workflow \
-  --memory=16g \
+  "--memory=$DOCKER_MEM" \
   "$IMAGE" \
   snakemake --use-conda --conda-prefix /opt/snakemake-envs "$@"

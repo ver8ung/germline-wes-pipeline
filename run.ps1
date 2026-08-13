@@ -32,29 +32,37 @@ $proj = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repo = 'ngs-germline-wes'
 
 # --- Image tag: git short sha (+ -dirty), else content hash of image inputs ---
+# MUST match the content-tag branch of run.sh byte for byte, or the same tree
+# builds two different images on Windows vs Linux. The previous version could
+# never agree with run.sh: it hashed each file separately, joined the UPPERCASE
+# hex digests and hashed that string, while run.sh cat'd the raw bytes and hashed
+# once -- mathematically unrelated functions -- and it also ordered the Dockerfile
+# first where run.sh put it last.
+#
+# Shared contract: sort inputs by relative POSIX path, concatenate their raw
+# bytes in that order, one SHA256 over the result, lowercase, first 12 chars.
+# base-image.txt is included because it is fed to the build as --build-arg BASE;
+# omitting it meant re-pinning the base silently reused a stale image.
 function Get-ContentTag {
-    $files = @(Join-Path $proj 'docker\Dockerfile')
+    $files = @()
     $files += Get-ChildItem (Join-Path $proj 'workflow\envs\*.yaml') |
-        Sort-Object FullName | Select-Object -ExpandProperty FullName
-    $acc = ($files | ForEach-Object { (Get-FileHash -Algorithm SHA256 -Path $_).Hash }) -join ''
-    $bytes = [System.Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::ASCII.GetBytes($acc))
-    return 'src-' + ((($bytes | ForEach-Object { $_.ToString('x2') }) -join '').Substring(0, 12))
+        Sort-Object Name | Select-Object -ExpandProperty FullName
+    $files += (Join-Path $proj 'docker\Dockerfile')
+    $files += (Join-Path $proj 'docker\base-image.txt')
+
+    $stream = New-Object System.IO.MemoryStream
+    foreach ($f in $files) {
+        $bytes = [System.IO.File]::ReadAllBytes($f)
+        $stream.Write($bytes, 0, $bytes.Length)
+    }
+    $stream.Position = 0
+    $hash = (Get-FileHash -InputStream $stream -Algorithm SHA256).Hash.ToLower()
+    $stream.Dispose()
+    return 'src-' + $hash.Substring(0, 12)
 }
 
-$tag = $null
-try {
-    $sha = (& git -C $proj rev-parse --short=12 HEAD 2>$null)
-    if ($LASTEXITCODE -eq 0 -and $sha) {
-        # Capture porcelain output first (a plain assignment); testing the native
-        # command's `2>$null` redirection directly inside `if (...)` trips
-        # PSScriptAnalyzer's PSPossibleIncorrectUsageOfRedirectionOperator (a
-        # false positive - `>` here redirects stderr, it is not a comparison).
-        $porcelain = (& git -C $proj status --porcelain 2>$null)
-        $dirty = if ($porcelain) { '-dirty' } else { '' }
-        $tag = "git-$($sha.Trim())$dirty"
-    }
-} catch {}
-if (-not $tag) { $tag = Get-ContentTag }
+# Deliberately NOT the git commit SHA -- see the comment on Get-ContentTag.
+$tag = Get-ContentTag
 $image = "${repo}:$tag"
 
 # --- Build this exact tag if it isn't present yet ---

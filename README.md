@@ -55,20 +55,28 @@ Windows, macOS, Linux, or an HPC node.
 ```
 ngs-germline-wes/
 ├── config/
-│   ├── config.yaml         # all knobs: reference URLs, intervals, filters, annotation
-│   ├── samples.tsv         # one row per biological sample
-│   └── units.tsv           # one row per lane/library (FASTQ pair) of a sample
+│   ├── config.yaml             # all knobs: reference URLs, intervals, filters, annotation
+│   ├── samples.tsv             # one row per biological sample
+│   ├── units.tsv               # one row per lane/library (FASTQ pair) of a sample
+│   ├── twist_onso.yaml         # overlay: the higher-depth Twist-Onso run
+│   └── units.twist_onso.tsv    #   its unit sheet (data not publicly available)
 ├── workflow/
-│   ├── Snakefile           # includes the rule modules, defines `all` + `setup_reference`
-│   ├── rules/*.smk         # common, resources, qc, trim, map, dedup_bqsr,
-│   │                       #   calling, filtering, annotation, stats
-│   └── envs/*.yaml         # pinned per-tool Conda environments
-├── docker/Dockerfile       # Snakemake + conda/mamba orchestrator image
-├── data/                   # ← put your FASTQ here (gitignored)
-├── resources/              # ← downloaded reference/known-sites/db (gitignored)
-├── results/                # ← pipeline outputs (gitignored)
-├── run.ps1                 # Windows launcher
-└── run.sh                  # Linux/macOS/WSL launcher
+│   ├── Snakefile               # includes the rule modules, defines `all` + `setup_reference`
+│   ├── rules/*.smk             # common, resources, capture_bed, qc, trim, map,
+│   │                           #   dedup_bqsr, calling, filtering, annotation,
+│   │                           #   stats, benchmark, smoke
+│   └── envs/*.yaml             # pinned per-tool Conda environments
+├── docker/
+│   ├── Dockerfile              # Snakemake + conda/mamba orchestrator image
+│   └── base-image.txt          # base image tag, passed in as a build-arg
+├── .tests/smoke/               # tiny simulated-read fixture for `smoke`
+├── dev/                        # author analysis tooling; NOT part of the pipeline
+├── data/                       # ← put your FASTQ here (gitignored)
+├── resources/                  # ← downloaded reference/known-sites/db (gitignored)
+├── results/                    # ← pipeline outputs (gitignored)
+├── run.ps1                     # Windows launcher
+├── run.cmd                     # cmd.exe wrapper around run.ps1
+└── run.sh                      # Linux/macOS/WSL launcher
 ```
 
 ---
@@ -78,9 +86,18 @@ ngs-germline-wes/
 - **Docker Desktop** (Windows/macOS) or Docker Engine (Linux). Nothing else is
   installed on the host — Snakemake and every bioinformatics tool live in the image
   / per-rule Conda envs.
-- **Memory:** give Docker **≥ 12 GB** RAM (Docker Desktop → Settings → Resources).
-  `bwa index` of GRCh38 and GATK each need several GB; the launchers request 16 GB.
-- **Disk:** ~30 GB for the reference bundle + known sites + SnpEff DB, plus working space.
+- **Memory:** give Docker **≥ 16 GB** RAM (Docker Desktop → Settings → Resources).
+  `bwa index` of GRCh38 and GATK each need several GB. The launchers request 16 GB
+  by default, so provisioning less than that means asking Docker for more than the
+  VM has. Override with `WES_DOCKER_MEMORY` (see *Environment variables* below).
+- **Disk:** budget **~70 GB** for the documented GIAB walkthrough, not 30:
+  - ~11 GB reference bundle + known sites + SnpEff DB + bwa index (`resources/`)
+  - ~16 GB input FASTQ for the default Garvan run (`data/`)
+  - ~35 GB working space and outputs (`results/`) — the recalibrated BAM alone is
+    the largest single file.
+
+  A run on your own smaller exome needs correspondingly less, but the reference
+  bundle is a fixed ~11 GB floor.
 - **Network:** the first run downloads the reference, known-sites VCFs, and the
   SnpEff database.
 
@@ -101,19 +118,27 @@ rows (multiple lanes/libraries) — they're aligned separately with distinct rea
 groups and merged before duplicate marking.
 
 **2. Supply your exome capture targets.** The default `config/config.yaml` →
-`intervals.bed` is `resources/intervals/twist_exome_v2.GRCh38.bed`, which
-`run get_capture_bed` builds for you. To use a different kit, point `intervals.bed`
-at your own GRCh38, `chr`-named target BED from the vendor (Agilent SureSelect,
-IDT xGen, Twist, …).
+`intervals.bed` is `resources/intervals/nextera_expandedexome.GRCh38.bed`, which
+`.\run get_capture_bed` builds for you (it is the kit that produced the default
+GIAB dataset, so kit and BED match out of the box). To use a different kit, point
+`intervals.bed` at your own GRCh38, `chr`-named target BED from the vendor
+(Agilent SureSelect, IDT xGen, Twist, …); three other providers are already wired
+up — see the `intervals` block in `config/config.yaml`.
 
 **3. Run it.**
 
 ```powershell
-# Windows, from the project root. Use run.cmd (works in cmd.exe AND PowerShell):
-run smoke -n                 # dry-run the smoke test (no downloads)
-run setup_reference          # download + index reference (once, ~20–40 min)
-run --cores 8                # full pipeline → results/annotated/all.annotated.vcf.gz
+# Windows, from the project root. Note the leading .\ — PowerShell does not
+# resolve commands from the current directory, so a bare `run` fails with
+# CommandNotFoundException. (In cmd.exe, bare `run` does work.)
+.\run smoke -n                # dry-run the smoke test (no downloads)
+.\run setup_reference         # download + index reference (once, ~1.5–2 h)
+.\run --cores 8               # full pipeline → results/annotated/all.annotated.vcf.gz
 ```
+
+> `setup_reference` is dominated by `bwa index` on GRCh38, which is single-threaded
+> and takes 60–90 minutes by itself on top of the ~4.9 GB of downloads. It is a
+> one-time cost — the index is reused by every later run.
 
 > **Why not just type `run.ps1`?** Double-clicking a `.ps1` or typing its bare
 > name opens it in **Notepad** — Windows associates `.ps1` with *edit*, not *run*.
@@ -144,13 +169,24 @@ Snakemake, e.g. `./run.sh --cores 8 -p` or a specific target file.
 
 The launchers keep each image in lockstep with the code that defines it:
 
-- **Commit-tagged images.** The tag is `git-<short-sha>` (plus `-dirty` if the
-  working tree has uncommitted changes), or `src-<hash>` of the Dockerfile +
-  `workflow/envs/*.yaml` when this isn't a git checkout. Each distinct tag builds
-  its own image; `:latest` also points at the most recent build.
-- **Pinned base.** The base image is read from
-  [docker/base-image.txt](docker/base-image.txt) and passed as a build-arg — pin
-  it to a digest there for reproducible rebuilds (instructions in the file).
+- **Content-tagged images.** The tag is `src-<hash>`, a SHA256 over exactly the
+  files that determine what the image contains: `workflow/envs/*.yaml`, the
+  Dockerfile, and `docker/base-image.txt`. Change any of them and you get a new
+  tag and a rebuild; change anything else and the existing image is reused.
+  `:latest` also points at the most recent build.
+
+  It is deliberately **not** the git commit SHA. Tagging by commit meant every
+  commit invalidated the tag and forced a needless 15–30 min rebuild, while two
+  commits with identical image inputs pointlessly built the same image twice.
+
+  Both launchers compute this hash identically (same file order, one hash over the
+  concatenated bytes, lowercase, first 12 chars), so a tree checked out on Windows
+  and on Linux resolves to the same image rather than building two.
+- **Pinnable base.** The base image is read from
+  [docker/base-image.txt](docker/base-image.txt) and passed as a build-arg. It
+  currently holds a floating tag, so two people building from the same commit can
+  get different base layers — pin it to a digest there if you need byte-level
+  reproducible rebuilds (instructions in the file).
 - **Staleness guard.** Before every run the launcher runs the image's baked
   `check-bake` script, which re-hashes the bind-mounted `workflow/envs/*.yaml` and
   compares to the digest baked at build time. If they differ you get a loud
@@ -222,9 +258,6 @@ those are bind-mounted and take effect on the next run.
 ## Handy commands
 
 ```bash
-# Build the image manually — context is the PROJECT ROOT, -f points into docker/:
-docker build -t ngs-germline-wes -f docker/Dockerfile .
-
 ./run.sh -n                                  # dry-run (plan only)
 ./run.sh --cores 8 -p                        # full run, print shell commands
 ./run.sh setup_reference                     # only fetch + index reference data
@@ -232,6 +265,37 @@ docker build -t ngs-germline-wes -f docker/Dockerfile .
 ./run.sh --dag | dot -Tsvg > dag.svg         # render the DAG (needs graphviz)
 ./run.sh --report report.html                # Snakemake provenance report (after a run)
 docker run --rm -it -v "${PWD}:/workflow" -w /workflow ngs-germline-wes bash  # poke around
+```
+
+Inside that last shell, `smoke` is **not** a Snakemake target — it is a shortcut the
+launchers expand to `--configfile .tests/smoke/config.yaml --cores 4`. Use the full
+form when you are driving `snakemake` directly.
+
+## Environment variables
+
+Both launchers read these; they are optional.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `WES_DOCKER_MEMORY` | `16g` | Memory limit passed to `docker run`. Must fit inside the Docker Desktop / WSL2 VM limit. Lower it on a smaller machine, e.g. `12g`. |
+| `WES_SCRATCH_BAMS` | unset | When set to `1`, mounts Docker **named volumes** over `results/{mapped,dedup,bqsr}` so heavy BAM I/O hits VM-native storage instead of the (slow) Windows bind mount. |
+
+`WES_SCRATCH_BAMS` has consequences worth knowing before you enable it:
+
+- The recalibrated BAM then lives **on a Docker volume, not on your disk**, so host
+  tools cannot see `results/bqsr/`. To read it (e.g. for `dev/diag_capture.sh`), add
+  `--mount type=volume,source=wes-bqsr,target=/workflow/results/bqsr` to your
+  `docker run`.
+- The volumes persist between runs. Reset them with
+  `docker volume rm wes-mapped wes-dedup wes-bqsr`.
+- Toggling it mid-project remaps those paths, so use it for fresh runs rather than
+  switching partway through.
+
+```powershell
+$env:WES_DOCKER_MEMORY = '12g'      # PowerShell
+```
+```bash
+WES_DOCKER_MEMORY=12g ./run.sh --cores 8    # bash
 ```
 
 ## Smoke test (built in)
@@ -265,12 +329,14 @@ a Bottle NA12878 subset), point `units.tsv` at the FASTQs, and use a small BED.
 
 ## Evaluating against GIAB (NA12878 / HG001)
 
-The repo is preconfigured for a **benchmarkable real run** against the GIAB
-NA12878 truth set — `config/samples.tsv` + `config/units.tsv` already describe one
-`NA12878` sample with 4 units (two libraries × two lanes, ≈100× combined).
+The repo's **default configuration is this benchmark run**, so no config edits are
+needed: `config/samples.tsv` + `config/units.tsv` describe one `NA12878` sample
+with 4 units (two libraries × two lanes), and `intervals.bed` already points at
+the Nextera BED — the kit that produced these reads. Kit and evaluation region
+therefore match, which is what makes the resulting numbers meaningful.
 
-1. **Download the WES reads** (≈15 GB, 8 files) into `data\garvan\` (where
-   `config/units.garvan_nextera.tsv` expects them):
+1. **Download the WES reads** (≈16 GB, 8 files) into `data\garvan\` (where
+   `config/units.tsv` expects them):
    ```powershell
    $u='https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/NA12878/Garvan_NA12878_HG001_HiSeq_Exome/'
    $dst='data\garvan'; New-Item -ItemType Directory -Force $dst | Out-Null
@@ -282,24 +348,49 @@ NA12878 truth set — `config/samples.tsv` + `config/units.tsv` already describe
    ```
 
 2. **Build the GRCh38 capture BED** (Illumina ships only hg19 → lifted over):
-   ```
-   run get_capture_bed
+   ```powershell
+   .\run get_capture_bed
    ```
    → `resources/intervals/nextera_expandedexome.GRCh38.bed` (what `intervals.bed` points at).
 
-3. **Run the pipeline:** `run --cores 8` → `results/annotated/all.annotated.vcf.gz`
+3. **Run the pipeline:** `.\run --cores 8` → `results/annotated/all.annotated.vcf.gz`
 
 4. **Benchmark** vs. GIAB high-confidence calls (hap.py, scored on *confident
    regions ∩ capture targets*; truth files auto-download):
-   ```
-   run benchmark
+   ```powershell
+   .\run benchmark
    ```
    → `results/benchmark/happy.summary.csv` (precision / recall / F1 for SNPs & indels).
 
+### Running a second dataset without destroying the first
+
+`benchmark.label` namespaces the hap.py output: unset (the default) writes
+`results/benchmark/happy.*`, and setting it writes `happy.<label>.*`. The
+`config/twist_onso.yaml` overlay uses it:
+
+```powershell
+.\run --configfile config/twist_onso.yaml --cores 8 all benchmark
+```
+
+Put `--cores` immediately after the configfile value — Snakemake 8's `--configfile`
+is greedy and will otherwise swallow the target name.
+
+> **Only the hap.py output is namespaced.** `results/genotyped/`,
+> `results/filtered/` and `results/annotated/` are cohort-level and share fixed
+> paths across configs, and both configs here call the same sample name, so
+> `results/bqsr/NA12878.recal.bam` collides too. **Run different configs
+> sequentially, and copy `results/annotated` and `results/filtered` aside between
+> them if you want to keep both.** Running them concurrently is not supported and
+> Snakemake's workdir lock will refuse it anyway.
+
 > **Rebuild the image first.** These features add two tool envs (`ucsc-liftover`,
 > `hap.py`), so the pre-baked image is now stale — the launcher's staleness guard
-> will warn. Re-bake: `docker rmi <image>` then re-run, or
-> `docker build -t ngs-germline-wes -f docker/Dockerfile .`
+> will warn. Re-bake with `docker rmi <image>` and then re-run the launcher, which
+> rebuilds under the tag the launcher actually looks for. Do **not** build by hand
+> with `docker build -t ngs-germline-wes ...`: that produces only the `:latest` tag,
+> the launcher still won't find the tag it wants, and you pay the 15–30 min build
+> twice. A manual build also skips `--build-arg BASE=`, silently ignoring
+> `docker/base-image.txt`.
 
 ---
 
