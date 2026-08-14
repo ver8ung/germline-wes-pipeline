@@ -110,9 +110,15 @@ rule merge_filtered:
         "../envs/gatk.yaml"
     shell:
         r"""
+        # --TMP_DIR, not --tmp-dir. MergeVcfs is a PICARD tool wrapped by GATK4 and
+        # keeps Picard's uppercase-underscore argument convention; the engine tools
+        # above (SelectVariants, VariantFiltration) take the lowercase GATK form.
+        # Getting this wrong fails the rule outright with "tmp-dir is not a
+        # recognized option" -- and only at runtime, since a dry run never invokes
+        # the shell command.
         gatk --java-options "-Xmx{params.xmx}m" MergeVcfs \
             -I {input.snvs} -I {input.indels} \
-            --tmp-dir {resources.tmpdir} \
+            --TMP_DIR {resources.tmpdir} \
             -O {output.vcf} 2> {log}
         """
 
