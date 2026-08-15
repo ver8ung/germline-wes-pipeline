@@ -383,6 +383,43 @@ therefore match, which is what makes the resulting numbers meaningful.
    ```
    → `results/benchmark/happy.summary.csv` (precision / recall / F1 for SNPs & indels).
 
+### Measured accuracy
+
+Committed under [`benchmarks/`](benchmarks/), one directory per run, each with a
+`PROVENANCE.md` recording the commit, config overlay, capture BED, scoring engine and
+truth set the numbers came from. Both runs below are GIAB HG001/NA12878 GRCh38 v4.2.1
+scored with hap.py 0.3.15.
+
+| Run | Type | Recall (ALL / PASS) | Precision (ALL / PASS) | F1 (ALL / PASS) |
+|---|---|---|---|---|
+| `default` (Garvan/Nextera) | SNP | 0.8925 / 0.8201 | 0.9715 / 0.9839 | 0.9303 / 0.8946 |
+| | INDEL | 0.7643 / 0.7629 | 0.6642 / 0.7365 | 0.7107 / 0.7495 |
+| `twist_onso` | SNP | 0.9406 / 0.9076 | 0.9859 / 0.9979 | 0.9627 / 0.9506 |
+| | INDEL | 0.8810 / 0.8797 | 0.7111 / 0.8257 | 0.7869 / 0.8519 |
+
+**Do not compare the two runs' recall or F1 to each other.** The evaluation region is
+the capture BED intersected with GIAB high confidence, so different kits give
+different denominators — 23,713 truth SNPs for `twist_onso` against 46,032 for
+`default`. They answer different questions.
+
+What *is* comparable, and what both runs agree on, is the **ALL-to-PASS behaviour:
+the default hard filters help indels and cost more than they buy on SNPs.**
+
+| | true variants lost | false positives removed | F1 |
+|---|---|---|---|
+| SNP, `default` | 3,333 | 588 | 0.9303 → 0.8946 |
+| SNP, `twist_onso` | 782 | 273 | 0.9627 → 0.9506 |
+| INDEL, `twist_onso` | 1 | 142 | 0.7869 → **0.8519** |
+
+`SOR3` accounts for ~74% of all filtered records in both runs. **The thresholds are
+left at GATK best practice and documented, not tuned** — tuning them against the one
+sample we benchmark would fit the filter to the test set. If your application is SNP
+recall-sensitive, `SOR3` in `config/config.yaml` is the first threshold to
+reconsider, and `results/filtered/all.filtered.vcf.gz` keeps every failing record
+with its FILTER tag intact so you can re-decide without re-running the pipeline.
+
+Each run's `NOTES.md` records dataset caveats and stage-by-stage runtimes.
+
 ### Running a second dataset without destroying the first
 
 `benchmark.label` namespaces the hap.py output: unset (the default) writes
