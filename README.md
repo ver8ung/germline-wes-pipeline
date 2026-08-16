@@ -60,12 +60,16 @@ ngs-germline-wes/
 │   ├── samples.tsv             # one row per biological sample
 │   ├── units.tsv               # one row per lane/library (FASTQ pair) of a sample
 │   ├── twist_onso.yaml         # overlay: the higher-depth Twist-Onso run
-│   └── units.twist_onso.tsv    #   its unit sheet (data not publicly available)
+│   ├── units.twist_onso.tsv    #   its unit sheet (data not publicly available)
+│   ├── giab_trio.yaml          # overlay: the GIAB Ashkenazim trio (n=3, joint calling)
+│   ├── samples.giab_trio.tsv   #   its sample sheet, with pedigree columns
+│   └── units.giab_trio.tsv     #   its unit sheet (reads reverted from BAM)
+├── benchmarks/                 # committed accuracy evidence, one dir per run
 ├── workflow/
 │   ├── Snakefile               # includes the rule modules, defines `all` + `setup_reference`
 │   ├── rules/*.smk             # common, resources, capture_bed, qc, trim, map,
 │   │                           #   dedup_bqsr, calling, filtering, annotation,
-│   │                           #   stats, benchmark, smoke
+│   │                           #   stats, benchmark, smoke, bam_revert
 │   └── envs/*.yaml             # pinned per-tool Conda environments
 ├── docker/
 │   ├── Dockerfile              # Snakemake + conda/mamba orchestrator image
@@ -313,11 +317,25 @@ WES_DOCKER_MEMORY=32g ./run.sh --cores 8    # bash
 
 > **There is a floor.** The launchers derive Snakemake's `--resources mem_mb`
 > budget from this value (90% of it), and refuse to start if the budget is smaller
-> than the largest single rule's reservation — `bwa_mem` reserves 12000 MiB, so
-> anything below 16g is rejected up front with a message naming the offending
-> rule. That check exists because the failure it replaces was miserable: Snakemake
-> only raises the error once the oversized job becomes schedulable, i.e. after
-> FastQC and trimming have already run, and the message blames pipes.
+> than the largest single rule's reservation — `bwa_mem` and `benchmark` each
+> reserve 12000 MiB, so anything below 16g is rejected up front with a message
+> naming the offending rule. That check exists because the failure it replaces was
+> miserable: Snakemake only raises the error once the oversized job becomes
+> schedulable, i.e. after FastQC and trimming have already run, and the message
+> blames pipes.
+>
+> This is why `resources.benchmark.mem_mb` is set *equal* to `bwa_mem`'s rather
+> than higher: the floor is the maximum over all rules, so raising it above 14745
+> would break the default 16g run for everyone, smoke test included.
+
+> **RTG sizes its JVM heap from the host, not the container.** `rtg format` and
+> `vcfeval` default to 90% of *detected physical* RAM, and inside Docker
+> `/proc/meminfo` still reports the **host's** memory — so the JVM happily
+> overshoots `--memory` and the container is OOM-killed with no Java stack trace at
+> all. Both rules that invoke rtg export `RTG_MEM` derived from their `mem_mb`
+> reservation. The documented `rtg RTG_MEM=8g <cmd>` first-argument form is not
+> reachable here because hap.py invokes rtg itself; the environment variable is the
+> only lever. If you add another rtg rule, export it there too.
 
 ## Smoke test (built in)
 
@@ -348,7 +366,7 @@ Equivalent to `snakemake --configfile .tests/smoke/config.yaml --cores 4 [...]`.
 To smoke-test with real data instead, grab a small public exome (e.g. a Genome in
 a Bottle NA12878 subset), point `units.tsv` at the FASTQs, and use a small BED.
 
-## Evaluating against GIAB (NA12878 / HG001)
+## Evaluating against GIAB
 
 The repo's **default configuration is this benchmark run**, so no config edits are
 needed: `config/samples.tsv` + `config/units.tsv` describe one `NA12878` sample
@@ -381,7 +399,59 @@ therefore match, which is what makes the resulting numbers meaningful.
    ```powershell
    .\run benchmark
    ```
-   → `results/benchmark/happy.summary.csv` (precision / recall / F1 for SNPs & indels).
+   → `results/benchmark/happy.NA12878.summary.csv` (precision / recall / F1 for
+   SNPs & indels), plus `happy.NA12878.extended.csv` with the same metrics broken
+   down by genomic context.
+
+### How scoring works
+
+**Benchmarking is per sample.** Truth sets are configured by sample name under
+`benchmark.truth` in `config/config.yaml` (HG001/NA12878 and the GIAB Ashkenazim
+trio ship configured), and a sample with no entry is simply not benchmarked — so
+the `benchmark` target does the right thing for a cohort containing a mix.
+
+Each sample's calls are extracted from the cohort callset before scoring, because
+**hap.py cannot score a multi-sample VCF and has no flag to select a column.**
+Under `vcfeval` it aborts; under the older `xcmp` engine it did not — it silently
+scored the first sample column and reported the result under whichever truth set
+you named. The extraction therefore runs at every cohort size, including n=1.
+
+**Comparison engine** is `benchmark.engine`, default `vcfeval` (RTG). Measured on
+identical input, vcfeval and hap.py's older `xcmp` default agree exactly on SNPs
+and to within ~0.001 F1 on indels — hap.py already left-shifts and decomposes both
+callsets before comparing, so most variant-representation differences are
+normalised before either engine sees them. vcfeval is the default because it is
+the stricter and more widely cited engine, **not** because it improves the
+numbers. One label = one engine: switching re-runs and replaces that label's
+output rather than sitting alongside it.
+
+vcfeval needs the reference in RTG's SDF format, built once by `rtg_format_sdf`
+(~1 min, ~1.2 GB). It is deliberately **not** part of `setup_reference`, so users
+who never benchmark do not pay for it.
+
+**Stratification** (`benchmark.stratification`) scores 14 curated
+[GIAB genome-stratification](https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/release/genome-stratifications/)
+subsets alongside the headline, turning one F1 into a map of *where* calling
+fails — homopolymers, tandem repeats, segmental duplications, low mappability, GC
+extremes, MHC, RefSeq CDS and their complements. This is the single most
+informative thing in the benchmark output; see `happy.extended.csv`, where
+`Subset=*` is the headline and the named subsets are diagnostic. The list is
+deliberately curated rather than GIAB's full 298-entry manifest, which would take
+`happy.extended.csv` from ~66 rows to ~6,600; widen it by copying more lines from
+`<base_url>GRCh38-all-stratifications.tsv` into `stratification.regions`.
+
+> **Migration note.** Truth files are now stored as
+> `resources/benchmark/<sample>.truth.{vcf.gz,bed}` rather than under their GIAB
+> filenames, because remote and local names cannot be assumed equal — HG001
+> publishes `..._benchmark.bed` while the whole Ashkenazim trio publishes
+> `..._benchmark_noinconsistent.bed`. If you already have the HG001 files, rename
+> rather than re-download them:
+> ```
+> cd resources/benchmark
+> mv HG001_GRCh38_1_22_v4.2.1_benchmark.vcf.gz     NA12878.truth.vcf.gz
+> mv HG001_GRCh38_1_22_v4.2.1_benchmark.vcf.gz.tbi NA12878.truth.vcf.gz.tbi
+> mv HG001_GRCh38_1_22_v4.2.1_benchmark.bed        NA12878.truth.bed
+> ```
 
 ### Measured accuracy
 
@@ -441,9 +511,82 @@ is greedy and will otherwise swallow the target name.
 > them if you want to keep both.** Running them concurrently is not supported and
 > Snakemake's workdir lock will refuse it anyway.
 
-> **Rebuild the image first.** These features add two tool envs (`ucsc-liftover`,
-> `hap.py`), so the pre-baked image is now stale — the launcher's staleness guard
-> will warn. Re-bake with `docker rmi <image>` and then re-run the launcher, which
+> **Switching to a config with DIFFERENT sample names needs the cohort results
+> cleared**, and this is not optional:
+> ```
+> rm -rf results/genotyped results/filtered results/annotated
+> ```
+> Snakemake decides a target is up to date by comparing it against its *direct*
+> inputs. When the whole cohort-level chain already exists it never descends as far
+> as `combine_gvcfs`, so it never notices the sample set changed — `all` would
+> report success while `results/annotated/` still described the previous cohort,
+> and the benchmark would then try to pull this cohort's samples out of it.
+> `common.smk` raises a `WorkflowError` at DAG-build time rather than letting that
+> happen, and the message names the command above.
+>
+> Only the cohort level needs clearing. `results/called/*.g.vcf.gz` and
+> `results/bqsr/*.recal.bam` are not `temp()`, so samples already processed are not
+> realigned and returning to a previous config costs the cohort steps only.
+
+### Benchmarking a trio (GIAB Ashkenazim)
+
+`config/giab_trio.yaml` runs HG002 (son), HG003 (father) and HG004 (mother) as one
+cohort — the first configuration here with more than one sample, and therefore the
+only one that exercises joint genotyping at n>1 or produces a Mendelian violation
+rate.
+
+GIAB publishes **no FASTQ** for these exomes. The only Illumina exome data for the
+trio is a position-sorted, duplicate-marked BAM per sample, so download those by
+hand (≈27.5 GB total; `curl -C -` resumes a broken transfer, which matters at this
+size):
+
+```powershell
+$b='https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/AshkenazimTrio/'
+$dst='data\giab_trio'; New-Item -ItemType Directory -Force $dst | Out-Null
+@{ HG002='HG002_NA24385_son/OsloUniversityHospital_Exome/151002_7001448_0359_AC7F6GANXX_Sample_HG002-EEogPU_v02-KIT-Av5_AGATGTAC_L008.posiSrt.markDup.bam';
+   HG003='HG003_NA24149_father/OsloUniversityHospital_Exome/151002_7001448_0359_AC7F6GANXX_Sample_HG003-EEogPU_v02-KIT-Av5_TCTTCACA_L008.posiSrt.markDup.bam';
+   HG004='HG004_NA24143_mother/OsloUniversityHospital_Exome/151002_7001448_0359_AC7F6GANXX_Sample_HG004-EEogPU_v02-KIT-Av5_CCGAAGTA_L008.posiSrt.markDup.bam' }.GetEnumerator() |
+  ForEach-Object { curl.exe -L -C - -o "$dst\$($_.Key).exome.bam" "$b$($_.Value)" }
+```
+
+`bam_revert.smk` then reverts each BAM to paired FASTQ under `results/reverted/`,
+which is what `config/units.giab_trio.tsv` points at. The source alignment is
+discarded entirely, so this pipeline's own mapping, duplicate marking and
+recalibration all apply as they would to any other input.
+
+```powershell
+rm -r -force results\genotyped, results\filtered, results\annotated   # see above
+.\run --configfile config/giab_trio.yaml --cores 8 all benchmark
+```
+
+> **The trio is scored against a PROXY capture BED, and its absolute recall is
+> depressed as a result.** This data was captured with Agilent SureSelect V5, whose
+> target BEDs are available only through a SureDesign account and cannot be
+> redistributed, so there is no public equivalent to ship. Twist Exome v2 is used
+> instead: a core-coding design that mostly sits inside V5's larger footprint, but
+> any region Twist targets that V5 did not enrich becomes an uncovered false
+> negative for reasons that have nothing to do with the caller.
+>
+> That is acceptable for what this run is for. HG002 vs HG003 vs HG004 share a kit,
+> a BED and their denominators, so the comparison between them is internally valid,
+> and the evaluation region is identical to the `twist_onso` run's. **Do not
+> compare these absolute recalls to the default (Nextera) run.** Quantify the
+> mismatch rather than asserting it — `SAMPLE=HG002 bash dev/diag_capture.sh` splits
+> the false negatives into covered and uncovered, and the `refseq_cds`
+> stratification subset gives a design-independent slice for free.
+
+**Mendelian violation rate** is emitted to `results/benchmark/mendelian.giab_trio.txt`
+whenever `samples.tsv` carries `sex` / `paternal_id` / `maternal_id` columns and some
+sample names both parents. It asks whether the child's genotypes could have been
+inherited, which needs **no truth set at all** — so unlike every hap.py number it
+covers the whole callset rather than the high-confidence regions, and cannot be
+flattered by anything specific to the benchmark. Restricted to chr1–22, matching the
+truth sets' own scope.
+
+> **Rebuild the image first.** These features add tool envs (`ucsc-liftover`,
+> `hap.py` + `rtg-tools`), so a pre-baked image built before them is stale — the
+> launcher's staleness guard will warn. Re-bake with `docker rmi <image>` and then
+> re-run the launcher, which
 > rebuilds under the tag the launcher actually looks for. Do **not** build by hand
 > with `docker build -t ngs-germline-wes ...`: that produces only the `:latest` tag,
 > the launcher still won't find the tag it wants, and you pay the 15–30 min build
@@ -464,3 +607,17 @@ is greedy and will otherwise swallow the target name.
 - **VariantFiltration JEXL warnings about missing annotations** — expected when an
   annotation (e.g. `MQRankSum`) is absent at a site; that site simply isn't filtered
   by that expression.
+- **`cohort.vcf.gz exists but was built WITHOUT these samples`** — you switched to a
+  config with different sample names. Clear the cohort-level results as the message
+  says; per-sample BAMs and GVCFs are kept, so nothing is realigned.
+- **Container OOM-killed during `benchmark` or `rtg_format_sdf`, no Java stack
+  trace** — RTG sized its heap from the *host's* RAM rather than the container's.
+  Both rules export `RTG_MEM`; if you added an rtg rule of your own, export it there
+  too.
+- **hap.py aborts on a multi-sample VCF** — score the per-sample query
+  (`results/benchmark/<sample>.query.vcf.gz`), which `benchmark_query_vcf` produces.
+  hap.py has no sample-selection flag.
+- **`revert_bam_to_fastq` produces almost only singletons** — the input BAM was not
+  collated, so mates were never adjacent. The rule collates first; if you adapted it,
+  do not feed `samtools fastq` a position-sorted BAM directly, and never drop `-s`
+  (without it singletons are written into the R1/R2 streams and destroy pairing).
