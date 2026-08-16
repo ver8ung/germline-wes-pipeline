@@ -34,10 +34,60 @@ else
   CONFIGFILE=""
 fi
 
+IMG="ngs-germline-wes:latest"
+
+# The cohort THIS invocation is about, read from the merged config's sample sheet.
+# Discovery below is intersected with it, and that intersection is load-bearing --
+# see the comment there.
+cohort_samples() {
+  MSYS_NO_PATHCONV=1 docker run --rm -i -v "$(pwd):/workflow" -w /workflow "$IMG" \
+    python - "$CONFIGFILE" <<'PY' 2>/dev/null || true
+import os, sys, yaml
+import csv
+overlay = sys.argv[1]
+cfg = yaml.safe_load(open("config/config.yaml")) or {}
+if overlay and os.path.exists(overlay):
+    ov = yaml.safe_load(open(overlay)) or {}
+    def merge(a, b):
+        for k, v in b.items():
+            if isinstance(v, dict) and isinstance(a.get(k), dict):
+                merge(a[k], v)
+            else:
+                a[k] = v
+    merge(cfg, ov)
+path = cfg.get("samples", "config/samples.tsv")
+with open(path) as fh:
+    rows = [l for l in fh if not l.lstrip().startswith("#")]
+for r in csv.DictReader(rows, delimiter="\t"):
+    if r.get("sample"):
+        print(r["sample"])
+PY
+}
+
 # --- Which samples? ----------------------------------------------------------
-# hap.py output is now per sample (happy[.label].<sample>.summary.csv), so with no
+# hap.py output is per sample (happy[.label].<sample>.summary.csv), so with no
 # explicit argument, collect every sample this run actually scored.
+#
+# The glob ALONE is not safe, and the unlabelled case is where it bites. `*`
+# matches dots, so `happy.*.summary.csv` matches every LABELLED run's output too:
+# results/benchmark/ deliberately holds all runs at once (that is the entire point
+# of benchmark.label), so `happy.twist_onso.NA12878.summary.csv` yields the
+# "sample" twist_onso.NA12878, and the pre-per-sample `happy.twist_onso.summary.csv`
+# yields twist_onso. Both then pass every guard below and get written into
+# benchmarks/default/ with the DEFAULT config's units sheet and capture BED
+# attached -- numbers stamped with a provenance describing a run that never
+# produced them, which is the exact failure this script exists to prevent.
+#
+# Intersecting with the cohort's own sample sheet is the exact filter: a label is
+# not a sample, and a sample from another cohort is not in this sheet.
 if [ ${#REQUESTED_SAMPLES[@]} -eq 0 ]; then
+  mapfile -t _COHORT < <(cohort_samples)
+  if [ ${#_COHORT[@]} -eq 0 ]; then
+    echo "FATAL: could not read the sample sheet for this config." >&2
+    echo "       Pass sample names explicitly, or check ${CONFIGFILE:-config/config.yaml}." >&2
+    exit 1
+  fi
+  _REJECTED=()
   mapfile -t REQUESTED_SAMPLES < <(
     for f in "${PREFIX_BASE}".*.summary.csv; do
       [ -f "$f" ] || continue
@@ -45,10 +95,32 @@ if [ ${#REQUESTED_SAMPLES[@]} -eq 0 ]; then
       echo "${s%.summary.csv}"
     done | sort -u
   )
+  _KEEP=()
+  for s in "${REQUESTED_SAMPLES[@]:-}"; do
+    [ -z "$s" ] && continue
+    if printf '%s\n' "${_COHORT[@]}" | grep -qxF "$s"; then
+      _KEEP+=("$s")
+    else
+      _REJECTED+=("$s")
+    fi
+  done
+  REQUESTED_SAMPLES=("${_KEEP[@]:-}")
+  # Report rather than silently drop: a rejected name usually means either a
+  # labelled run's output (fine, collect it with its own label) or a sample sheet
+  # that no longer matches the results on disk (not fine).
+  if [ ${#_REJECTED[@]} -gt 0 ]; then
+    echo "note: ignoring benchmark output not belonging to this cohort: ${_REJECTED[*]}" >&2
+    echo "      (collect a labelled run with: $0 <label>)" >&2
+  fi
 fi
 
-if [ ${#REQUESTED_SAMPLES[@]} -eq 0 ]; then
-  echo "FATAL: no ${PREFIX_BASE}.<sample>.summary.csv found." >&2
+# ${arr[@]:-} above can leave a single empty element; strip it.
+_TMP=()
+for s in "${REQUESTED_SAMPLES[@]:-}"; do [ -n "$s" ] && _TMP+=("$s"); done
+REQUESTED_SAMPLES=("${_TMP[@]:-}")
+
+if [ -z "${REQUESTED_SAMPLES[0]:-}" ]; then
+  echo "FATAL: no ${PREFIX_BASE}.<sample>.summary.csv found for this cohort." >&2
   echo "       Run the pipeline and the 'benchmark' target first." >&2
   exit 1
 fi
@@ -64,8 +136,6 @@ DIRTY=""
 if [ -n "$(git status --porcelain -- . ':(exclude)benchmarks' 2>/dev/null)" ]; then
   DIRTY="  **(working tree was DIRTY -- these numbers do not describe a clean commit)**"
 fi
-
-IMG="ngs-germline-wes:latest"
 
 # --- Metadata, parsed properly rather than grepped --------------------------
 # Everything below is read from the artifacts of the run that ACTUALLY happened
