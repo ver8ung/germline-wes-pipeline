@@ -89,14 +89,74 @@ capture_bed:
   hg19_url:     https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/NA12878/Garvan_NA12878_HG001_HiSeq_Exome/nexterarapidcapture_expandedexome_targetedregions.bed.gz
   chain_url:    https://hgdownload.soe.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz
 
-# --- Benchmarking against the GIAB truth set (hap.py) ------------------------
-# `benchmark` target compares results/filtered/all.filtered.vcf.gz to the GIAB
-# HG001/NA12878 GRCh38 v4.2.1 high-confidence calls, restricted to (confident
-# regions ∩ capture targets). Truth files are downloaded if absent.
+# --- Benchmarking against the GIAB truth sets (hap.py) -----------------------
+# The `benchmark` target scores each sample that has a truth entry below,
+# restricted to (that sample's confident regions ∩ capture targets). Truth files
+# are downloaded if absent.
 benchmark:
-  base_url:  https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/release/NA12878_HG001/NISTv4.2.1/GRCh38/
-  truth_vcf: resources/benchmark/HG001_GRCh38_1_22_v4.2.1_benchmark.vcf.gz
-  truth_bed: resources/benchmark/HG001_GRCh38_1_22_v4.2.1_benchmark.bed
+  # Comparison engine. `vcfeval` (RTG) resolves variant-representation
+  # differences properly; the old default `xcmp` counted a left-shifted or
+  # differently-decomposed indel as both a false negative AND a false positive,
+  # which is why archived indel numbers are pessimistic. Kept switchable so the
+  # archived xcmp runs can be reproduced, but note ONE LABEL = ONE ENGINE:
+  # switching re-runs and REPLACES that label's output rather than sitting
+  # alongside it.
+  engine: vcfeval
+
+  # Truth sets keyed by SAMPLE NAME. Remote filenames are values, and local paths
+  # are derived as resources/benchmark/<sample>.truth.*, because remote and local
+  # names CANNOT be assumed equal: HG001 ships ..._benchmark.bed while every
+  # Ashkenazim-trio member ships ..._benchmark_noinconsistent.bed. The previous
+  # `base_url + basename(local_path)` derivation could not express that.
+  # A sample with no entry here is simply not benchmarked (the smoke sample, say)
+  # rather than being an error.
+  truth:
+    NA12878:
+      base_url: https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/release/NA12878_HG001/NISTv4.2.1/GRCh38/
+      vcf:      HG001_GRCh38_1_22_v4.2.1_benchmark.vcf.gz
+      bed:      HG001_GRCh38_1_22_v4.2.1_benchmark.bed
+    HG002:
+      base_url: https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/release/AshkenazimTrio/HG002_NA24385_son/NISTv4.2.1/GRCh38/
+      vcf:      HG002_GRCh38_1_22_v4.2.1_benchmark.vcf.gz
+      bed:      HG002_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed
+    HG003:
+      base_url: https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/release/AshkenazimTrio/HG003_NA24149_father/NISTv4.2.1/GRCh38/
+      vcf:      HG003_GRCh38_1_22_v4.2.1_benchmark.vcf.gz
+      bed:      HG003_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed
+    HG004:
+      base_url: https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/release/AshkenazimTrio/HG004_NA24143_mother/NISTv4.2.1/GRCh38/
+      vcf:      HG004_GRCh38_1_22_v4.2.1_benchmark.vcf.gz
+      bed:      HG004_GRCh38_1_22_v4.2.1_benchmark_noinconsistent.bed
+
+  # GIAB genome stratifications: score each subset separately so the summary says
+  # WHERE calling fails, not just how often. Without these, a poor indel F1 is a
+  # single number; with them it resolves into homopolymers vs tandem repeats vs
+  # everything else.
+  stratification:
+    activate: true
+    version:  v3.6
+    base_url: https://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/release/genome-stratifications/v3.6/GRCh38@all/
+    # A CURATED subset, NOT the 298-entry upstream manifest -- that would take
+    # happy.extended.csv from 66 rows to ~6,600 (several MB per sample per run)
+    # and multiply hap.py's quantify stage. These 14 answer the questions an exome
+    # callset actually raises. Keys are the manifest's own names, so widening the
+    # list means copying more lines from
+    #   <base_url>GRCh38-all-stratifications.tsv
+    regions:
+      refseq_cds:                                 Functional/GRCh38_refseq_cds.bed.gz
+      notinrefseq_cds:                            Functional/GRCh38_notinrefseq_cds.bed.gz
+      alldifficultregions:                        Union/GRCh38_alldifficultregions.bed.gz
+      notinalldifficultregions:                   Union/GRCh38_notinalldifficultregions.bed.gz
+      segdups:                                    SegmentalDuplications/GRCh38_segdups.bed.gz
+      lowmappabilityall:                          Mappability/GRCh38_lowmappabilityall.bed.gz
+      MHC:                                        OtherDifficult/GRCh38_MHC.bed.gz
+      SimpleRepeat_homopolymer_4to6_slop5:        LowComplexity/GRCh38_SimpleRepeat_homopolymer_4to6_slop5.bed.gz
+      SimpleRepeat_homopolymer_7to11_slop5:       LowComplexity/GRCh38_SimpleRepeat_homopolymer_7to11_slop5.bed.gz
+      SimpleRepeat_homopolymer_ge12_slop5:        LowComplexity/GRCh38_SimpleRepeat_homopolymer_ge12_slop5.bed.gz
+      AllTandemRepeats_le50bp_slop5:              LowComplexity/GRCh38_AllTandemRepeats_le50bp_slop5.bed.gz
+      notinAllTandemRepeatsandHomopolymers_slop5: LowComplexity/GRCh38_notinAllTandemRepeatsandHomopolymers_slop5.bed.gz
+      gclt25orgt65_slop50:                        GCcontent/GRCh38_gclt25orgt65_slop50.bed.gz
+      gc30to55_slop50:                            GCcontent/GRCh38_gc30to55_slop50.bed.gz
 
 # --- Variant hard-filtering thresholds (GATK best-practice defaults) ---------
 # Used instead of VQSR so the pipeline works for any cohort size, incl. n=1.
@@ -159,3 +219,14 @@ resources:
     mem_mb: 6000
   annotate:
     mem_mb: 6000           # snpEff; was a hardcoded -Xmx4g answering to nothing
+  benchmark:
+    # hap.py under vcfeval, plus `rtg format`. xcmp needed neither a JVM nor the
+    # stratification BEDs held in memory during quantify, so this rule previously
+    # reserved nothing at all.
+    #
+    # 12000 is deliberately EQUAL to bwa_mem's 12000, not larger. Both launchers
+    # take the MAXIMUM mem_mb in this file and refuse to start if the container is
+    # smaller than max/0.9, so today's ceiling is 12000 -> a 16 GB container
+    # (budget 14745) is fine. Anything >= 14746 here would hard-break the default
+    # WES_DOCKER_MEMORY=16g run for every user, including the smoke test.
+    mem_mb: 12000

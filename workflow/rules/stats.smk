@@ -46,7 +46,11 @@ rule bcftools_stats:
     conda:
         "../envs/samtools.yaml"
     shell:
-        "bcftools stats {input.vcf} > {output} 2> {log}"
+        # -s - adds the per-sample PSC/PSI sections. Without it bcftools reports
+        # only aggregate site counts, which at n=1 happens to be the same thing and
+        # for a cohort silently merges every sample into one row -- so MultiQC
+        # showed a trio as though it were a single sample.
+        "bcftools stats -s - {input.vcf} > {output} 2> {log}"
 
 
 def multiqc_inputs(wildcards):
@@ -81,5 +85,12 @@ rule multiqc:
     conda:
         "../envs/multiqc.yaml"
     shell:
-        # Scan the qc + logs trees; --force overwrites a stale report.
-        "multiqc --force -o results/qc -n multiqc_report.html results/qc logs 2> {log}"
+        # Aggregate exactly the declared inputs, NOT the results/qc and logs trees.
+        # Scanning the directories meant the report included whatever happened to
+        # be lying around from a previous config -- results/ is shared across
+        # configs and sample names differ, so a trio's report silently absorbed the
+        # previous NA12878 run's FastQC and samtools metrics and presented them as
+        # part of this cohort. The declared inputs are already the exact set (see
+        # multiqc_inputs above); this just makes the command honour them.
+        # --force overwrites a stale report.
+        "multiqc --force -o results/qc -n multiqc_report.html {input} 2> {log}"

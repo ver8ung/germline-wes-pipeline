@@ -1,0 +1,83 @@
+# =============================================================================
+# Overlay config for the GIAB Ashkenazim trio (HG002 son, HG003 father,
+# HG004 mother) -- Oslo University Hospital exome, Agilent SureSelect V5, 2015.
+#
+# Merged on top of config/config.yaml; only the keys below are overridden.
+#
+# Usage (put --cores right after the configfile value, so Snakemake 8's greedy
+# --configfile does not swallow the target):
+#   .\run.ps1 --configfile config/giab_trio.yaml --cores 8 all benchmark
+#
+# WHAT THIS RUN IS FOR. Every other benchmark in this repo is NA12878 -- two
+# capture kits and an 8x depth range applied to ONE genome. This is the first run
+# on different genomes, and the first with more than one sample in the cohort, so
+# it is also the first time joint genotyping (CombineGVCFs -> GenotypeGVCFs) is
+# exercised at n>1 rather than at n=1.
+#
+# PREREQUISITE: the three source BAMs must be downloaded by hand into
+# data/giab_trio/ first -- see the README. They are ~27.5 GB total and are
+# reverted to FASTQ by rule revert_bam_to_fastq.
+#
+# COHORT-LEVEL OUTPUTS COLLIDE with the other configs. Only the hap.py output is
+# namespaced by the label below; results/genotyped/, results/filtered/ and
+# results/annotated/ are cohort-level and share fixed paths. Run configs
+# SEQUENTIALLY, and clear the cohort outputs when switching between them:
+#
+#   rm -rf results/genotyped results/filtered results/annotated
+#
+# This is NOT optional and Snakemake will not do it for you. It decides a target
+# is up to date by comparing it against its DIRECT inputs, so when the whole
+# cohort-level chain already exists it never descends to combine_gvcfs and never
+# sees that the sample set changed -- `all` would report success while
+# results/annotated/ still described the previous cohort. common.smk raises a
+# WorkflowError at DAG-build time rather than letting that happen, and the message
+# tells you the command above.
+#
+# Only the cohort level needs clearing: per-sample results/called/*.g.vcf.gz and
+# results/bqsr/*.recal.bam are not temp(), so samples already processed are not
+# realigned and coming back to a previous config costs the cohort steps only
+# (~30 min), not a full run.
+# =============================================================================
+
+samples: config/samples.giab_trio.tsv
+units:   config/units.giab_trio.tsv
+
+# Source BAMs for rule revert_bam_to_fastq, keyed by sample.
+revert_bams:
+  HG002: data/giab_trio/HG002.exome.bam
+  HG003: data/giab_trio/HG003.exome.bam
+  HG004: data/giab_trio/HG004.exome.bam
+
+# --- Capture BED: a documented PROXY, not the real kit -----------------------
+# This data was captured with Agilent SureSelect V5 (~50 Mb design). Agilent
+# distributes its target BEDs only through a SureDesign account and their licence
+# does not permit redistribution, so this repo cannot ship one and no public
+# equivalent exists.
+#
+# Twist Exome v2 (~36.5 Mb) is used instead. It is a core-coding design that sits
+# largely inside V5's larger footprint, so most of it should be captured -- but
+# ANY region Twist targets that V5 did not enrich becomes an uncovered false
+# negative, which DEPRESSES ABSOLUTE RECALL for reasons that have nothing to do
+# with the caller.
+#
+# That is acceptable because of what this run is for. The comparison that matters
+# is HG002 vs HG003 vs HG004: same kit, same BED, same denominators, so it is
+# internally valid. It also shares its evaluation region exactly with the
+# twist_onso run, which makes the repo's actual finding -- hard filters help
+# indels and cost more than they buy on SNPs -- a four-sample statement rather
+# than a one-sample one.
+#
+# DO NOT compare these absolute recalls to the default (Nextera) run, and do not
+# report them without the caveat. Quantify the mismatch instead of asserting it:
+#   SAMPLE=HG002 bash dev/diag_capture.sh
+# splits the false negatives into covered and uncovered, so FRAC_CALLABLE_10x
+# over the Twist∩GIAB region IS the size of the kit mismatch. The `refseq_cds`
+# stratification subset gives a design-independent slice of the same run for free.
+intervals:
+  bed: resources/intervals/twist_exome_v2.GRCh38.bed
+
+# Namespace this run's hap.py output so it does not overwrite the other runs'
+# results/benchmark/happy.* files. Truth sets are per sample and already
+# configured in config/config.yaml for HG002, HG003 and HG004.
+benchmark:
+  label: giab_trio

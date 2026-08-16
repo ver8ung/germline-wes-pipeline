@@ -41,6 +41,7 @@ include: "rules/filtering.smk"
 include: "rules/annotation.smk"
 include: "rules/stats.smk"
 include: "rules/smoke.smk"
+include: "rules/bam_revert.smk"
 include: "rules/capture_bed.smk"
 include: "rules/benchmark.smk"
 

@@ -21,6 +21,17 @@
 #       bash -c 'LABEL=twist_onso BED=resources/intervals/twist_exome_v2.GRCh38.bed \
 #                bash dev/diag_capture.sh'
 #
+#   # for one sample of a multi-sample run (see config/giab_trio.yaml):
+#   docker run --rm -v "$PWD:/workflow" -w /workflow ngs-germline-wes:latest \
+#       bash -c 'LABEL=giab_trio SAMPLE=HG002 \
+#                BED=resources/intervals/twist_exome_v2.GRCh38.bed \
+#                bash dev/diag_capture.sh'
+#
+# The trio is the case this matters most for: it is scored against a PROXY capture
+# BED (Twist v2 standing in for the unobtainable Agilent SureSelect V5 targets), so
+# some of its false negatives are certainly regions the real kit never enriched.
+# FRAC_CALLABLE_10x below is what turns that caveat into a number.
+#
 # If the run used the WES_SCRATCH_BAMS scratch volumes, results/bqsr lives on a
 # Docker volume rather than the bind mount, so add:
 #   --mount type=volume,source=wes-bqsr,target=/workflow/results/bqsr
@@ -29,20 +40,29 @@ set -euo pipefail
 # LABEL selects which hap.py output to read. Empty (the default) = the
 # unlabelled output of the default config; otherwise happy.<LABEL>.*
 LABEL="${LABEL:-}"
+# SAMPLE picks which sample of the cohort to diagnose. hap.py output, the recal
+# BAM and the truth BED are ALL per-sample now, so deriving the three of them from
+# one variable is what keeps them describing the same sample -- overriding only
+# BAM and leaving the truth BED pointing at another genome would silently compare
+# one sample's coverage against another's confident regions.
+SAMPLE="${SAMPLE:-NA12878}"
 BED="${BED:-resources/intervals/nextera_expandedexome.GRCh38.bed}"
-BAM="${BAM:-results/bqsr/NA12878.recal.bam}"
-CONF="${CONF:-resources/benchmark/HG001_GRCh38_1_22_v4.2.1_benchmark.bed}"
+BAM="${BAM:-results/bqsr/${SAMPLE}.recal.bam}"
+CONF="${CONF:-resources/benchmark/${SAMPLE}.truth.bed}"
 
 if [ -n "$LABEL" ]; then
-  HAPPY="results/benchmark/happy.${LABEL}.vcf.gz"
+  HAPPY="results/benchmark/happy.${LABEL}.${SAMPLE}.vcf.gz"
 else
-  HAPPY="results/benchmark/happy.vcf.gz"
+  HAPPY="results/benchmark/happy.${SAMPLE}.vcf.gz"
 fi
 
 SAMTOOLS=$(ls /opt/snakemake-envs/*/bin/samtools 2>/dev/null | head -1 || true)
 BEDTOOLS=$(ls /opt/snakemake-envs/*/bin/bedtools 2>/dev/null | head -1 || true)
 echo "LABEL=${LABEL:-<none>}"
+echo "SAMPLE=$SAMPLE"
 echo "BED=$BED"
+echo "BAM=$BAM"
+echo "CONF=$CONF"
 echo "HAPPY=$HAPPY"
 echo "TOOL_samtools=$SAMTOOLS"
 echo "TOOL_bedtools=$BEDTOOLS"

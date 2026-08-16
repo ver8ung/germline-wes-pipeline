@@ -12,10 +12,17 @@
 # Two libraries (NIST7035, NIST7086), two lanes each = 4 units of one sample,
 # merged per sample after alignment.
 #
+# The `library` column is what makes that true in the data as well as in this
+# comment. It becomes @RG LB:, and MarkDuplicates keys duplicate detection on
+# (library, 5' position) -- so without it each LANE looked like its own library
+# and cross-lane PCR duplicates were never marked. The column is optional; omit it
+# and each unit is treated as its own library, which is right only when that is
+# actually the case.
+#
 # To run your OWN data instead, replace these rows and point intervals.bed in
 # config/config.yaml at your kit's GRCh38 target BED.
-sample	unit	platform	fq1	fq2
-NA12878	7035_L001	ILLUMINA	data/garvan/NIST7035_TAAGGCGA_L001_R1_001.fastq.gz	data/garvan/NIST7035_TAAGGCGA_L001_R2_001.fastq.gz
-NA12878	7035_L002	ILLUMINA	data/garvan/NIST7035_TAAGGCGA_L002_R1_001.fastq.gz	data/garvan/NIST7035_TAAGGCGA_L002_R2_001.fastq.gz
-NA12878	7086_L001	ILLUMINA	data/garvan/NIST7086_CGTACTAG_L001_R1_001.fastq.gz	data/garvan/NIST7086_CGTACTAG_L001_R2_001.fastq.gz
-NA12878	7086_L002	ILLUMINA	data/garvan/NIST7086_CGTACTAG_L002_R1_001.fastq.gz	data/garvan/NIST7086_CGTACTAG_L002_R2_001.fastq.gz
+sample	unit	platform	library	fq1	fq2
+NA12878	7035_L001	ILLUMINA	NIST7035	data/garvan/NIST7035_TAAGGCGA_L001_R1_001.fastq.gz	data/garvan/NIST7035_TAAGGCGA_L001_R2_001.fastq.gz
+NA12878	7035_L002	ILLUMINA	NIST7035	data/garvan/NIST7035_TAAGGCGA_L002_R1_001.fastq.gz	data/garvan/NIST7035_TAAGGCGA_L002_R2_001.fastq.gz
+NA12878	7086_L001	ILLUMINA	NIST7086	data/garvan/NIST7086_CGTACTAG_L001_R1_001.fastq.gz	data/garvan/NIST7086_CGTACTAG_L001_R2_001.fastq.gz
+NA12878	7086_L002	ILLUMINA	NIST7086	data/garvan/NIST7086_CGTACTAG_L002_R1_001.fastq.gz	data/garvan/NIST7086_CGTACTAG_L002_R2_001.fastq.gz

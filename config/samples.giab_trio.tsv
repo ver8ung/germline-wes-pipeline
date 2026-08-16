@@ -1,0 +1,14 @@
+# GIAB Ashkenazim trio -- HG002 (son), HG003 (father), HG004 (mother).
+#
+# The `sex` / `paternal_id` / `maternal_id` columns are OPTIONAL everywhere else;
+# they exist here so the pipeline can emit a PLINK pedigree and compute a
+# Mendelian violation rate. That number is worth having because it needs no truth
+# set at all: it asks whether the child's genotypes are inheritable from the
+# parents' , which is an accuracy signal that is completely independent of GIAB
+# and therefore cannot be gamed by anything specific to the benchmark regions.
+#
+# sex: 1 = male, 2 = female (PLINK convention). 0 = unknown parent.
+sample	condition	sex	paternal_id	maternal_id
+HG002	normal	1	HG003	HG004
+HG003	normal	1	0	0
+HG004	normal	2	0	0

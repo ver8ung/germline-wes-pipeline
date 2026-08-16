@@ -6,4 +6,14 @@ dependencies:
   # tool that scores its output is pinned too — an unpinned benchmark engine
   # silently shifts precision/recall between runs of the same pipeline. 0.3.15
   # is the latest bioconda release.
-  - hap.py =0.3.15   # GA4GH benchmarking vs the GIAB truth set (default xcmp engine)
+  - hap.py =0.3.15   # GA4GH benchmarking vs the GIAB truth set
+  # The vcfeval comparison engine, and `rtg format` for the SDF reference it needs.
+  # It has to live in THIS env, not its own: hap.py resolves the engine by exec'ing
+  # `rtg` from PATH inside its own environment, and a separate Snakemake conda env's
+  # prefix is a content hash that no rule can name.
+  # Safe to co-install -- rtg-tools is noarch:generic (openjdk, no Python constraint),
+  # so it cannot perturb the py27 hap.py stack: the solver still picks the identical
+  # hap.py build (0.3.15 py27hcb73b3d_0) that produced the archived xcmp numbers.
+  # Verified absent from every baked env before adding, because bioconda's hap.py
+  # recipe touches build/bin/rtg and a stub would have silently clobbered this one.
+  - rtg-tools =3.13

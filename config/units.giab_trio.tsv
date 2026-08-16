@@ -1,0 +1,21 @@
+# GIAB Ashkenazim trio, Oslo University Hospital exome (2015).
+#
+# THE FASTQ PATHS POINT AT results/, NOT data/, AND THAT IS DELIBERATE.
+# GIAB publishes no FASTQ for these exomes -- the only Illumina exome data for
+# HG002/HG003/HG004 is a position-sorted, duplicate-marked BAM. Those BAMs are
+# downloaded by hand into data/giab_trio/ (see the README) and reverted to paired
+# FASTQ by rule revert_bam_to_fastq, which writes here. common.smk deliberately
+# skips its FASTQ-existence check for paths under results/ so that generated reads
+# are a supported input, exactly as for the smoke test.
+#
+# Capture kit is Agilent SureSelect V5, for which no public target BED exists
+# (Agilent gates them behind a SureDesign account). config/giab_trio.yaml scores
+# these against the Twist Exome v2 BED as a documented PROXY -- see the comments
+# there before reading the recall numbers.
+#
+# One lane each (L008), one library each, so `library` is the library name from
+# the source filename rather than a fabricated per-unit value.
+sample	unit	platform	library	fq1	fq2
+HG002	L008	ILLUMINA	HG002-EEogPU_v02	results/reverted/HG002.R1.fastq.gz	results/reverted/HG002.R2.fastq.gz
+HG003	L008	ILLUMINA	HG003-EEogPU_v02	results/reverted/HG003.R1.fastq.gz	results/reverted/HG003.R2.fastq.gz
+HG004	L008	ILLUMINA	HG004-EEogPU_v02	results/reverted/HG004.R1.fastq.gz	results/reverted/HG004.R2.fastq.gz

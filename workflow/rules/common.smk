@@ -53,6 +53,38 @@ if _missing_fastqs:
     )
 
 
+# --- Guard: a cohort callset left over from a DIFFERENT set of samples --------
+# results/genotyped/, results/filtered/ and results/annotated/ are cohort-level
+# and share fixed paths across configs. Snakemake decides a target is up to date
+# by comparing it with its DIRECT inputs, so when every cohort-level output
+# already exists it never descends as far as combine_gvcfs and never notices that
+# the sample set changed. Switching from one cohort to another therefore does NOT
+# re-run anything: `all` reports success while results/annotated/ still describes
+# the PREVIOUS cohort, and the benchmark then tries to pull this cohort's samples
+# out of the previous cohort's VCF.
+#
+# The per-sample GVCFs are the exact test, and they are not temp(): a cohort VCF
+# cannot possibly contain a sample whose GVCF was never produced.
+_cohort_vcf = "results/genotyped/cohort.vcf.gz"
+if os.path.exists(_cohort_vcf):
+    _no_gvcf = sorted(
+        s
+        for s in samples["sample"]
+        if not os.path.exists(f"results/called/{s}.g.vcf.gz")
+    )
+    if _no_gvcf:
+        raise WorkflowError(
+            f"\n{_cohort_vcf} exists but was built WITHOUT these samples:\n  "
+            + "\n  ".join(_no_gvcf)
+            + "\n\nThe cohort-level outputs on disk belong to a different cohort, and"
+            "\nSnakemake will treat them as up to date rather than rebuilding them."
+            "\nMove or delete the stale cohort results before running this config:"
+            "\n  rm -rf results/genotyped results/filtered results/annotated"
+            "\n(Per-sample results/called/*.g.vcf.gz and results/bqsr/*.recal.bam are"
+            "\nkept, so samples already processed are not realigned.)\n"
+        )
+
+
 # --- Wildcard constraints ---------------------------------------------------
 # Restrict wildcards to declared values so '{sample}.{unit}' filenames split
 # unambiguously even when one name is a prefix of another (regex backtracks).
@@ -97,11 +129,28 @@ def get_unit_fastqs(wildcards):
 
 
 def get_read_group(wildcards):
-    """SAM @RG header for bwa -R. ID per-unit, SM per-sample (BQSR needs both)."""
-    platform = units.loc[(wildcards.sample, wildcards.unit), "platform"]
+    """SAM @RG header for bwa -R. ID per-unit, SM per-sample, LB per LIBRARY.
+
+    LB used to be fabricated as `{sample}.{unit}`, i.e. one library per unit. That
+    is only right when every unit really is its own library, and it is wrong for
+    the default sheet: NIST7035 and NIST7086 are two libraries sequenced over two
+    lanes each. MarkDuplicates keys duplicate detection on (LB, 5' position), so
+    calling each lane its own library meant cross-lane PCR duplicates of the same
+    library were NEVER marked -- under-counting duplicates and overstating
+    effective depth.
+
+    The `library` column is optional: without it the old fabricated value is used,
+    so sheets that never had one behave exactly as before (correctly so for
+    units.twist_onso.tsv, whose 8 units genuinely are 8 separate libraries).
+    """
+    u = units.loc[(wildcards.sample, wildcards.unit)]
+    if "library" in units.columns and pd.notna(u["library"]):
+        library = u["library"]
+    else:
+        library = f"{wildcards.sample}.{wildcards.unit}"
     return (
-        r"@RG\tID:{s}.{u}\tSM:{s}\tLB:{s}.{u}\tPU:{s}.{u}\tPL:{pl}"
-    ).format(s=wildcards.sample, u=wildcards.unit, pl=platform)
+        r"@RG\tID:{s}.{u}\tSM:{s}\tLB:{lb}\tPU:{s}.{u}\tPL:{pl}"
+    ).format(s=wildcards.sample, u=wildcards.unit, lb=library, pl=u["platform"])
 
 
 def sample_units(sample):

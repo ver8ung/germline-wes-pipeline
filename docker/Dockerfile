@@ -56,7 +56,25 @@ RUN mkdir -p _buildcfg \
     && printf 'chr20\t30000000\t30100000\n' > _buildcfg/smoke.bed \
     && printf 'sample\tcondition\nsmoke\tnormal\n' > _buildcfg/samples.tsv \
     && printf 'sample\tunit\tplatform\tfq1\tfq2\nsmoke\tL001\tILLUMINA\tresults/smoke/smoke.R1.fastq.gz\tresults/smoke/smoke.R2.fastq.gz\n' > _buildcfg/units.tsv \
-    && printf 'samples: _buildcfg/samples.tsv\nunits: _buildcfg/units.tsv\nintervals:\n  bed: _buildcfg/smoke.bed\n  padding: 100\n' > _buildcfg/config.yaml \
+    && printf '%s\n' \
+        'samples: _buildcfg/samples.tsv' \
+        'units: _buildcfg/units.tsv' \
+        'intervals:' \
+        '  bed: _buildcfg/smoke.bed' \
+        '  padding: 100' \
+        '# A truth entry for the build-only sample, merged over the real ones in' \
+        '# config/config.yaml. It exists purely so the benchmark DAG RESOLVES for' \
+        '# --conda-create-envs-only, which never executes a rule -- the URL below is' \
+        '# therefore never fetched and deliberately points nowhere. Without an entry,' \
+        '# the per-sample wildcard constraint in benchmark.smk excludes "smoke" and' \
+        '# the pre-bake target has no rule to produce it.' \
+        'benchmark:' \
+        '  truth:' \
+        '    smoke:' \
+        '      base_url: https://example.invalid/' \
+        '      vcf: smoke.truth.vcf.gz' \
+        '      bed: smoke.truth.bed' \
+        > _buildcfg/config.yaml \
     && snakemake \
         --snakefile workflow/Snakefile \
         --configfile _buildcfg/config.yaml \
@@ -68,7 +86,7 @@ RUN mkdir -p _buildcfg \
         resources/intervals/illumina_exome_v2.5.GRCh38.bed \
         resources/intervals/idt_xgen_exome_v2.GRCh38.bed \
         resources/intervals/nextera_expandedexome.GRCh38.bed \
-        results/benchmark/happy.summary.csv \
+        results/benchmark/happy.smoke.summary.csv \
     && mamba clean -afy \
     && conda clean -afy
 
