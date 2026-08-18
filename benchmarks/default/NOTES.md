@@ -27,11 +27,15 @@ positives, not recall:**
 
 True positives are static (SNP ALL 41,085 -> 41,080; SNP PASS 37,752 -> 37,793).
 
-**The SNP gain is entirely the `LB:` fix, not the engine.** The twist_onso run was
-re-scored with vcfeval against an identical callset and the two engines agreed to
-four decimal places on SNPs -- they differ only on variant representation, which is
-an indel phenomenon. So on SNPs the engine contributed exactly nothing here and the
-whole improvement is attributable to duplicate marking.
+**The SNP gain is entirely the `LB:` fix, not the engine.** The `twist_onso` run --
+which does *not* receive the LB fix, because its 8 units genuinely are separate
+libraries -- was later re-run from FASTQ and scored with vcfeval. Its SNP
+`TRUTH.TOTAL/TP/FN`, `QUERY.TOTAL/FP/UNK`, recall, precision and F1 came back
+identical to the archived xcmp values to every printed digit; only the false-positive
+cause split (`FP.gt`/`FP.al`) moved, and on indels exactly one variant crossed from FP
+to TP. So the engine is worth about one indel and nothing at all on SNPs, and the
+whole improvement here is attributable to duplicate marking. See
+`benchmarks/twist_onso/NOTES.md` for that comparison in full.
 
 `@RG LB:` used to be fabricated as `{sample}.{unit}`, making each lane look like its
 own library. This sheet is two libraries over two lanes each, and MarkDuplicates
@@ -65,8 +69,11 @@ The headline F1 of 0.8959 is an average over wildly different regimes. From
 **The MHC is a total failure, and it replicates across capture kits.** 1,049
 confident truth SNPs in the evaluation region, **zero** recovered, 16 query records
 emitted. The `twist_onso` run shows the same thing on a completely different capture
-design (553 truth SNPs, 0 TP, 11 records), so this is a property of the pipeline
-rather than of either kit.
+design and at several times the depth -- 553 truth SNPs, zero recovered, and not one
+PASS record emitted -- so this is a property of the pipeline rather than of either
+kit. (Its 11 MHC records are the ALL row; all 11 fail a hard filter. Do not quote the
+ALL record count next to a PASS true-positive count, as an earlier version of this
+sentence did.)
 
 The cause is mapping, not capture or filtering. Measured on the twist_onso BAM,
 **98.2% of reads in chr6:28.5-33.5 Mb carry MAPQ 0**, against 0.07% in a control
@@ -104,7 +111,12 @@ and it says clearly which indels from this callset to distrust.
 | INDEL | 5 | 550 | 110 : 1 for | 0.7133 -> 0.7515 |
 
 Unchanged in direction from the previous run and reproduced by `twist_onso` on a
-different kit at ~8x the depth. `SOR3` dominates the filtered set in both runs.
+different kit at substantially greater depth -- though the depth ratio between the two
+runs is an unmeasured quantity, not the "~8x" this file used to assert: both figures
+are mapped-bases-over-target-size upper bounds that assume a 100% on-target rate
+neither run measured. The direction reproduces; the magnitude does not (5.8:1 against
+here, 2.9:1 there). `SOR3` is the dominant tag in this run's filtered set, and in
+`twist_onso` it carries 74.0% of all filtered records and 85.9% of filtered SNPs.
 Thresholds are deliberately left at GATK best practice and documented, not tuned:
 tuning against the only sample we benchmark would be fitting the filter to the test
 set.

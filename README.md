@@ -142,7 +142,8 @@ up — see the `intervals` block in `config/config.yaml`.
 ```
 
 > `setup_reference` is dominated by `bwa index` on GRCh38, which is single-threaded
-> and takes 60–90 minutes by itself on top of the ~4.9 GB of downloads. It is a
+> and takes roughly 45–60 minutes by itself on top of the ~4.9 GB of downloads
+> (`logs/resources/bwa_index.log` recorded 2,762 s = 46 min here). It is a
 > one-time cost — the index is reused by every later run.
 
 > **Why not just type `run.ps1`?** Double-clicking a `.ps1` or typing its bare
@@ -416,11 +417,15 @@ Under `vcfeval` it aborts; under the older `xcmp` engine it did not — it silen
 scored the first sample column and reported the result under whichever truth set
 you named. The extraction therefore runs at every cohort size, including n=1.
 
-**Comparison engine** is `benchmark.engine`, default `vcfeval` (RTG). Measured on
-identical input, vcfeval and hap.py's older `xcmp` default agree exactly on SNPs
-and to within ~0.001 F1 on indels — hap.py already left-shifts and decomposes both
-callsets before comparing, so most variant-representation differences are
-normalised before either engine sees them. vcfeval is the default because it is
+**Comparison engine** is `benchmark.engine`, default `vcfeval` (RTG). On the
+`twist_onso` benchmark the two engines returned identical SNP recall, precision and F1
+and identical TP/FN/FP/UNK counts, differing only in how they attribute false
+positives between genotype and allele errors (`FP.gt`/`FP.al`); on indels exactly one
+variant crossed from FP to TP, worth ~0.001 F1 — hap.py already left-shifts and
+decomposes both callsets before comparing, so most variant-representation differences
+are normalised before either engine sees them. Note what that control is: the two
+engines scored independently generated callsets whose counts matched, not literally
+the same VCF. vcfeval is the default because it is
 the stricter and more widely cited engine, **not** because it improves the
 numbers. One label = one engine: switching re-runs and replaces that label's
 output rather than sitting alongside it.
@@ -462,10 +467,10 @@ scored with hap.py 0.3.15.
 
 | Run | Type | Recall (ALL / PASS) | Precision (ALL / PASS) | F1 (ALL / PASS) |
 |---|---|---|---|---|
-| `default` (Garvan/Nextera) | SNP | 0.8925 / 0.8201 | 0.9715 / 0.9839 | 0.9303 / 0.8946 |
-| | INDEL | 0.7643 / 0.7629 | 0.6642 / 0.7365 | 0.7107 / 0.7495 |
+| `default` (Garvan/Nextera) | SNP | 0.8924 / 0.8210 | 0.9737 / 0.9859 | 0.9313 / 0.8959 |
+| | INDEL | 0.7643 / 0.7633 | 0.6686 / 0.7402 | 0.7133 / 0.7515 |
 | `twist_onso` | SNP | 0.9406 / 0.9076 | 0.9859 / 0.9979 | 0.9627 / 0.9506 |
-| | INDEL | 0.8810 / 0.8797 | 0.7111 / 0.8257 | 0.7869 / 0.8519 |
+| | INDEL | 0.8822 / 0.8810 | 0.7120 / 0.8269 | 0.7880 / 0.8531 |
 
 **Do not compare the two runs' recall or F1 to each other.** The evaluation region is
 the capture BED intersected with GIAB high confidence, so different kits give
@@ -477,11 +482,16 @@ the default hard filters help indels and cost more than they buy on SNPs.**
 
 | | true variants lost | false positives removed | F1 |
 |---|---|---|---|
-| SNP, `default` | 3,333 | 588 | 0.9303 → 0.8946 |
+| SNP, `default` | 3,287 | 568 | 0.9313 → 0.8959 |
 | SNP, `twist_onso` | 782 | 273 | 0.9627 → 0.9506 |
-| INDEL, `twist_onso` | 1 | 142 | 0.7869 → **0.8519** |
+| INDEL, `default` | 5 | 550 | 0.7133 → **0.7515** |
+| INDEL, `twist_onso` | 1 | 142 | 0.7880 → **0.8531** |
 
-`SOR3` accounts for ~74% of all filtered records in both runs. **The thresholds are
+The two effects come from two different filters that never touch the same variant
+type: `SOR3` is defined only under `filtering.snvs`, so it cannot fire on an indel,
+while `QD2` does the indel work. Measured on the retained `twist_onso` callset, `SOR3`
+carries 74.0% of all filtered records and 85.9% of filtered SNPs, and `QD2` carries
+90.3% of filtered indels. **The thresholds are
 left at GATK best practice and documented, not tuned** — tuning them against the one
 sample we benchmark would fit the filter to the test set. If your application is SNP
 recall-sensitive, `SOR3` in `config/config.yaml` is the first threshold to
